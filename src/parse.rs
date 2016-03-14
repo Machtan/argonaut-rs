@@ -1,27 +1,26 @@
-use std::borrow::{Cow, Borrow};
+use std::borrow::{Borrow};
 use std::collections::{HashMap, HashSet};
-use std::env;
 
 /// A parsed argument.
 // Lifetime 'a is the "definitions" and 'b is the "arguments".
 #[derive(Debug)]
 pub enum Arg<'a, 'b> {
-    Positional { name: &'a str, value: Cow<'b, str> },
-    Trail { value: Cow<'b, str> },
+    Positional { name: &'a str, value: &'b str },
+    Trail { value: &'b str },
     Switch { name: &'a str },
-    Option { name: &'a str, value: Cow<'b, str> },
+    Option { name: &'a str, value: &'b str },
 }
 
 /// The name of an optional argument.
 #[derive(Debug, Clone)]
-pub enum OptName<'a> {
-    Long(Cow<'a, str>),
-    LongAndShort(Cow<'a, str>, char),
+pub enum OptName<T: Borrow<str>> {
+    Long(T),
+    LongAndShort(T, char),
 }
 
-impl<'a> OptName<'a> {
+impl<T: Borrow<str>> OptName<T> {
     /// The 'long' component of the name.
-    pub fn borrow_long(&'a self) -> &'a str {
+    pub fn borrow_long<'a>(&'a self) -> &'a str {
         match *self {
             OptName::Long(ref name) | OptName::LongAndShort(ref name, _) => {
                 name.borrow()
@@ -32,38 +31,38 @@ impl<'a> OptName<'a> {
 
 /// The different argument structures to expect.
 #[derive(Debug, Clone)]
-pub enum DefType<'a> {
-    Positional { name: Cow<'a, str> },
+pub enum DefType<T: Borrow<str>> {
+    Positional { name: T },
     Trail(TrailType),
-    Switch { name: OptName<'a> },
-    Option { name: OptName<'a> },
+    Switch { name: OptName<T> },
+    Option { name: OptName<T> },
 }
 
 #[must_use = "The argument definition is only partially constructed"]
-pub struct PartialArgDef<'a> {
-    pub name: OptName<'a>
+pub struct PartialArgDef<T: Borrow<str>> {
+    pub name: OptName<T>
 }
 
-impl<'a> PartialArgDef<'a> {
-    pub fn switch(self) -> ArgDef<'a> {
+impl<T: Borrow<str>> PartialArgDef<T> {
+    pub fn switch(self) -> ArgDef<T> {
         ArgDef::new(DefType::Switch { name: self.name })
     }
     
-    pub fn option(self) -> ArgDef<'a> {
+    pub fn option(self) -> ArgDef<T> {
         ArgDef::new(DefType::Option { name: self.name })
     }
 }
 
 /// The definition of one or more arguments to expect when parsing.
 #[derive(Debug, Clone)]
-pub struct ArgDef<'a> {
-    pub deftype: DefType<'a>,
-    pub help: Option<Cow<'a, str>>,
-    pub parameter: Option<Cow<'a, str>>,
+pub struct ArgDef<T: Borrow<str>> {
+    pub deftype: DefType<T>,
+    pub help: Option<T>,
+    pub parameter: Option<T>,
 }
 
-impl<'a> ArgDef<'a> {
-    fn new(deftype: DefType<'a>) -> ArgDef<'a> {
+impl<T: Borrow<str>> ArgDef<T> {
+    fn new(deftype: DefType<T>) -> ArgDef<T> {
         ArgDef {
             deftype: deftype,
             help: None,
@@ -71,39 +70,33 @@ impl<'a> ArgDef<'a> {
         }
     } 
     
-    pub fn positional<T>(name: T) -> ArgDef<'a> where T: Into<Cow<'a, str>> {
-        ArgDef::new(DefType::Positional { name: name.into() })
+    pub fn positional(name: T) -> ArgDef<T> {
+        ArgDef::new(DefType::Positional { name: name })
     }
     
-    pub fn required_trail() -> ArgDef<'a> {
+    pub fn required_trail() -> ArgDef<T> {
         ArgDef::new(DefType::Trail(TrailType::OnePlus))
     }
     
-    pub fn optional_trail() -> ArgDef<'a> {
+    pub fn optional_trail() -> ArgDef<T> {
         ArgDef::new(DefType::Trail(TrailType::ZeroPlus))
     }
     
-    pub fn named<T>(name: T) 
-            -> PartialArgDef<'a> where T: Into<Cow<'a, str>> {
-        PartialArgDef { name: OptName::Long(name.into()) }
+    pub fn named(name: T) -> PartialArgDef<T> {
+        PartialArgDef { name: OptName::Long(name) }
     }
     
-    pub fn named_and_short<T>(name: T, short: char)
-            -> PartialArgDef<'a> where T: Into<Cow<'a, str>> {
-        PartialArgDef { name: OptName::LongAndShort(name.into(), short) }
+    pub fn named_and_short(name: T, short: char) -> PartialArgDef<T> {
+        PartialArgDef { name: OptName::LongAndShort(name, short) }
     }
     
-    pub fn set_help<T>(&mut self, help: T) 
-            -> &mut Self 
-            where T: Into<Cow<'a, str>> {
-        self.help = Some(help.into());
+    pub fn set_help(&mut self, help: T) -> &mut Self {
+        self.help = Some(help);
         self
     }
     
-    pub fn set_parameter<T>(&mut self, param: T) 
-            -> &mut Self 
-            where T: Into<Cow<'a, str>> {
-        self.parameter = Some(param.into());
+    pub fn set_parameter(&mut self, param: T) -> &mut Self {
+        self.parameter = Some(param);
         self
     }
 }
@@ -134,55 +127,59 @@ enum OptType {
 #[derive(Debug)]
 pub enum ParseError<'a, 'b> {
     MissingPositional(&'a str),
+    MissingParameter(&'a str),
     MissingTrail,
-    UnexpectedPositional(Cow<'b, str>),
-    UnknownShortArgument(char, Cow<'b, str>),
-    UnknownLongArgument(Cow<'b, str>),
-    MissingParameter(Cow<'b, str>),
-    GroupedNonSwitch(char, Cow<'b, str>),
+    UnexpectedPositional(&'b str),
+    UnexpectedShortArgument(char, &'b str),
+    UnexpectedLongArgument(&'b str),
+    GroupedNonSwitch(char, &'b str),
 }
 
 /// A parse of a set of string arguments.
 // Lifetime 'a is the "definitions" and 'b is the "arguments".
 #[derive(Debug, Clone)]
-pub struct Parse<'a, 'b> {
+pub struct Parse<'a, 'b, T: 'b + Borrow<str>> {
+    args: &'b [T],
+    index: usize,
+    finished: bool,
     positional: Vec<&'a str>,
     next_position: usize,
     trail: Option<TrailType>,
+    trail_args_found: usize,
     options: HashMap<&'a str, OptType>, 
     aliases: HashMap<char, &'a str>,
-    reversed_args: Vec<Cow<'b, str>>,
-    remaining_grouped_shorts: Option<(Cow<'b, str>, Vec<char>)>,
-    finished: bool,
-    trail_args_found: usize,
+    remaining_grouped_shorts: Vec<(usize, char)>,
 }
 
 
 
-impl<'a, 'b> Parse<'a, 'b> {
+impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
     
-    fn add_name(name: &'a OptName<'a>, aliases: &mut HashMap<char, &'a str>, 
-            used_names: &mut HashSet<Cow<'a, str>>) 
-            -> Result<(), DefinitionError<'a>> {
+    fn add_name<D>(name: &'a OptName<D>, aliases: &mut HashMap<char, &'a str>, 
+            used_names: &mut HashSet<&'a str>) 
+            -> Result<(), DefinitionError<'a>> 
+            where D: Borrow<str> {
         use self::DefinitionError::*;
         match *name {
             OptName::Long(ref long) => {
-                if used_names.contains(long) {
-                    return Err(DefinedTwice(long.borrow()));
+                let name = long.borrow();
+                if used_names.contains(name) {
+                    return Err(DefinedTwice(name));
                 } else {
-                    used_names.insert(long.clone());
+                    used_names.insert(name);
                 }
             },
             OptName::LongAndShort(ref long, short) => {
-                if used_names.contains(long) {
-                    return Err(DefinedTwice(long.borrow()));
+                let name = long.borrow();
+                if used_names.contains(name) {
+                    return Err(DefinedTwice(name));
                 } else {
-                    used_names.insert(long.clone());
+                    used_names.insert(name);
                 }
                 if let Some(other_long) = aliases.get(&short) {
-                    return Err(SameShortName(long.borrow(), other_long.clone()));
+                    return Err(SameShortName(name, other_long.clone()));
                 }
-                aliases.insert(short, long.borrow());
+                aliases.insert(short, name);
             }
         }
         Ok(())
@@ -190,9 +187,9 @@ impl<'a, 'b> Parse<'a, 'b> {
     
     /// Starts a new parse checking for the expected argument structure among
     /// the given list of arguments.
-    pub fn new<T>(expected: &'a [ArgDef<'a>], args: &[T])
-            -> Result<Parse<'a, 'b>, DefinitionError<'a>> 
-            where T: Clone + Into<Cow<'b, str>> {
+    pub fn new<D>(expected: &'a [ArgDef<D>], args: &'b [T])
+            -> Result<Parse<'a, 'b, T>, DefinitionError<'a>> 
+            where D: Borrow<str> {
         use self::DefinitionError::*;
         use self::DefType::*;
         
@@ -215,37 +212,31 @@ impl<'a, 'b> Parse<'a, 'b> {
                     }
                 },
                 Switch { ref name } => {
-                    try!(Parse::add_name(name, &mut aliases, &mut used_names));
+                    try!(Parse::<T>::add_name(name, &mut aliases, &mut used_names));
                     options.insert(name.borrow_long().clone(), OptType::Switch);
                 },
                 Option { ref name } => {
-                    try!(Parse::add_name(name, &mut aliases, &mut used_names));
+                    try!(Parse::<T>::add_name(name, &mut aliases, &mut used_names));
                     options.insert(name.borrow_long().clone(), OptType::Option);
                 },
             }
         }
         
         Ok(Parse {
-            options: options,
+            args: args,
+            index: 0,
+            finished: false,
             positional: positional,
             next_position: 0,
             trail: trail,
-            aliases: aliases,
-            reversed_args: args.iter().rev()
-                .map(|a: &T| (*a).clone().into()).collect(),
-            remaining_grouped_shorts: None,
-            finished: false,
             trail_args_found: 0,
+            options: options,
+            aliases: aliases,
+            remaining_grouped_shorts: vec![], 
         })
     }
     
-    /// Creates a parse of the arguments given to the program at launch.
-    pub fn new_from_env(expected: &'a [ArgDef<'a>])
-            -> Result<Parse<'a, 'b>, DefinitionError<'a>> {
-        Parse::new(expected, &env::args().skip(1).collect::<Vec<String>>())
-    }
-    
-    fn read_option(&mut self, name: &'a str, opt_type: &OptType, arg: Cow<'b, str>)
+    fn read_option(&mut self, name: &'a str, opt_type: &OptType)
             -> Result<Arg<'a, 'b>, ParseError<'a, 'b>> {
         use self::OptType::*;
         use self::ParseError::*;
@@ -254,34 +245,37 @@ impl<'a, 'b> Parse<'a, 'b> {
                 Ok(Arg::Switch { name: name })
             },
             Option => {
-                if self.reversed_args.is_empty() {
+                if self.args.is_empty() {
                     self.finished = true;
-                    Err(MissingParameter(arg))
+                    Err(MissingParameter(name.borrow()))
                 } else {
-                    if let Some(param) = self.reversed_args.pop() {
-                        if param.starts_with("-") {
+                    let arg_count = self.args.len();
+                    if self.index < arg_count {
+                        let ref param = self.args[self.index];
+                        let string = param.borrow();
+                        self.index += 1;
+                        if string.starts_with("-") {
                             self.finished = true;
-                            Err(MissingParameter(arg))
+                            Err(MissingParameter(name.clone()))
                         } else {
-                            Ok(Arg::Option { name: name, value: param })
+                            Ok(Arg::Option { name: name, value: string })
                         }
                     } else {
                         self.finished = true;
-                        Err(MissingParameter(arg))
+                        Err(MissingParameter(name.clone()))
                     }
                 }
             },
         }
     }
     
-    /// Ends this parse and returns the remaining arguments.
-    pub fn finish(mut self) -> Vec<Cow<'b, str>> {
-        self.reversed_args.reverse();
-        self.reversed_args
+    /// Returns the remaining unparsed arguments of this parse.
+    pub fn remainder(&self) -> &'b [T] {
+        &self.args[self.index..]
     }
 }
 
-impl<'a, 'b> Iterator for Parse<'a, 'b> {
+impl<'a, 'b, T: 'b + Borrow<str>> Iterator for Parse<'a, 'b, T> {
     type Item = Result<Arg<'a, 'b>, ParseError<'a, 'b>>;
 
     /// Attempts to read the next argument for this parse
@@ -293,33 +287,27 @@ impl<'a, 'b> Iterator for Parse<'a, 'b> {
             return None;
         }
         
-        let is_empty = if let Some((_, ref shorts)) = self.remaining_grouped_shorts {
-            shorts.is_empty()
-        } else {
-            false
-        };
-        if is_empty {
-            self.remaining_grouped_shorts = None;
-        }
+        // Check for extra grouped short arguments from the last parsed argument
         
-        if let Some((ref arg, ref mut shorts)) = self.remaining_grouped_shorts {
-            let short = shorts.pop().expect("shorts not cleared");
-            
+        if let Some((index, short)) = self.remaining_grouped_shorts.pop() {            
             let name = if let Some(name) = self.aliases.get(&short) {
                 name.clone()
             } else {
                 self.finished = true;
-                return Some(Err(UnknownShortArgument(short, arg.clone())));
+                return Some(Err(UnexpectedShortArgument(short, self.args[index].borrow())));
             };
             if let OptType::Option = *self.options.get(name).expect("Invariant broken") {
                 self.finished = true;
-                return Some(Err(GroupedNonSwitch(short, arg.clone())));
+                return Some(Err(GroupedNonSwitch(short, self.args[index].borrow())));
             } else {
                 return Some(Ok(Switch { name: name }));
             }
         }
         
-        let arg = if let Some(arg) = self.reversed_args.pop() {
+        let arg_count = self.args.len();
+        let arg = if self.index < arg_count {
+            let ref arg = self.args[self.index];
+            self.index += 1;
             arg
         // No more arguments
         } else {
@@ -339,33 +327,35 @@ impl<'a, 'b> Iterator for Parse<'a, 'b> {
         };
         
         // Long argument
-        if arg.starts_with("--") {
-            let opt_type = if let Some(opt_type) = self.options.get(&arg[2..]) {
+        let string = arg.borrow();
+        if string.starts_with("--") {
+            let opt_type = if let Some(opt_type) = self.options.get(&string[2..]) {
                 opt_type.clone()
             } else {
                 self.finished = true;
-                return Some(Err(UnknownLongArgument(arg.clone())));
+                return Some(Err(UnexpectedLongArgument(string.clone())));
             };
             // Exchange the "argument" reference with the "definition" one
-            let key = self.options.keys().find(|n| *n == &&arg[2..]).unwrap().clone();
-            return Some(self.read_option(key, &opt_type, arg));
+            let key = self.options.keys().find(|n| *n == &&string[2..]).unwrap().clone();
+            return Some(self.read_option(key, &opt_type));
        
         // Short argument
-        } else if arg.starts_with("-") {
-            let mut shorts: Vec<_> = arg.chars().skip(1).collect();
+        } else if string.starts_with("-") {
+            let mut shorts: Vec<_> = string.chars().skip(1)
+                .map(|ch| (self.index - 1, ch)).collect();
             if shorts.len() > 1 { // grouped short args
                 shorts.reverse();
-                self.remaining_grouped_shorts = Some((arg, shorts));
+                self.remaining_grouped_shorts = shorts;
             } else {
-                let short = shorts[0];
+                let (_, short) = shorts[0];
                 let name = if let Some(name) = self.aliases.get(&short) {
                     name.clone()
                 } else {
                     self.finished = true;
-                    return Some(Err(UnknownShortArgument(short, arg.clone())));
+                    return Some(Err(UnexpectedShortArgument(short, string.clone())));
                 };
                 let opt_type = self.options.get(name).expect("Invariant broken").clone();
-                return Some(self.read_option(name, &opt_type, arg));
+                return Some(self.read_option(name, &opt_type));
             }
         
         // Positional argument
@@ -374,17 +364,17 @@ impl<'a, 'b> Iterator for Parse<'a, 'b> {
             if self.next_position < self.positional.len() {
                 let position = self.positional[self.next_position];
                 self.next_position += 1;
-                return Some(Ok(Positional { name: position, value: arg }));
+                return Some(Ok(Positional { name: position, value: string }));
             
             // Trail
             } else if let Some(_) = self.trail {
                 self.trail_args_found += 1;
-                return Some(Ok(Trail { value: arg }));
+                return Some(Ok(Trail { value: string }));
             
             // No trail
             } else {
                 self.finished = true;
-                return Some(Err(UnexpectedPositional(arg)));
+                return Some(Err(UnexpectedPositional(string)));
             }
         }
         
