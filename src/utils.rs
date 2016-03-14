@@ -1,6 +1,4 @@
-use arg::{self};
-use parser::{Parser, internal_get_definitions};
-
+//! Outdated!
 
 fn align_lines(lines: &mut Vec<Vec<String>>, padding: Option<char>) {
     let mut widths = Vec::new();
