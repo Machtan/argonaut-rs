@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 /// A parsed argument.
 // Lifetime 'a is the "definitions" and 'b is the "arguments".
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Arg<'a, 'b> {
     Positional { name: &'a str, value: &'b str },
     Trail { value: &'b str },
@@ -109,7 +109,7 @@ pub enum TrailType {
 }
 
 /// An error found when defining the expected argument structure.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum DefinitionError<'a> {
     SameShortName(&'a str, &'a str),
     DefinedTwice(&'a str),
@@ -124,7 +124,7 @@ enum OptType {
 }
 
 /// An error found when parsing.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ParseError<'a, 'b> {
     MissingPositional(&'a str),
     MissingParameter(&'a str),
@@ -379,5 +379,125 @@ impl<'a, 'b, T: 'b + Borrow<str>> Iterator for Parse<'a, 'b, T> {
         }
         
         None
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn missing_positional() {
+        let pos = ArgDef::positional("pos");
+        let expected = &[pos];
+        let args: Vec<String> = vec![];
+        let mut parse = Parse::new(expected, &args).unwrap();
+        assert_eq!(
+            parse.next(), 
+            Some(Err(ParseError::MissingPositional("pos")))
+        );
+    }
+    
+    #[test]
+    fn example_parse_black_box() {
+        use super::Arg::*;
+        
+        let a_foo = ArgDef::positional("foo");
+        let a_foobar = ArgDef::required_trail();
+        let a_help = ArgDef::named_and_short("help", 'h').switch();
+        let a_version = ArgDef::named("version").switch();
+        let a_verbose = ArgDef::named_and_short("verbose", 'v').switch();
+        let a_exclude = ArgDef::named_and_short("exclude", 'x').option();
+        let a_passed = ArgDef::named("").switch();
+        
+        let args = vec![
+            String::from("foo"),
+            String::from("bar"),
+            String::from("-x"),
+            String::from("baz"),
+            String::from("--verbose"),
+            String::from("--"),
+            String::from("arg"),
+            String::from("--help]"),
+        ];
+        
+        let mut foo = "";
+        let mut foobar = Vec::new();
+        let mut verbose = false;
+        let mut exclude = None;
+        let mut passed = None;
+        
+        let expected = &[a_foo, a_foobar, a_help, a_version, a_verbose, a_exclude,
+             a_passed];
+    
+        let mut parse = Parse::new(expected, &args).expect("Invalid definitions");
+        while let Some(item) = parse.next() {
+            match item {
+                Ok(Positional { name: "foo", value }) => {
+                    foo = value;
+                },
+                Ok(Trail { value }) => {
+                    foobar.push(value);
+                },
+                Ok(Switch { name: "verbose" }) => {
+                    verbose = true;
+                },
+                Ok(Option { name: "exclude", value }) => {
+                    exclude = Some(value);
+                },
+                Ok(Switch { name: "" }) => {
+                    passed = Some(parse.remainder());
+                    break;
+                },
+                _ => unreachable!(),
+            }
+        }
+        
+        assert_eq!(foo, "foo");
+        assert_eq!(foobar, vec!["bar"]);
+        assert_eq!(exclude, Some("baz"));
+        assert_eq!(verbose, true);
+        assert_eq!(passed, Some(&args[6..]));    
+    }
+    
+    #[test]
+    fn example_parse_white_box() {
+        use super::Arg::*;
+        
+        let a_foo = ArgDef::positional("foo");
+        let a_foobar = ArgDef::required_trail();
+        let a_help = ArgDef::named_and_short("help", 'h').switch();
+        let a_version = ArgDef::named("version").switch();
+        let a_verbose = ArgDef::named_and_short("verbose", 'v').switch();
+        let a_exclude = ArgDef::named_and_short("exclude", 'x').option();
+        let a_passed = ArgDef::named("").switch();
+        
+        let args = vec![
+            String::from("foo"),
+            String::from("bar"),
+            String::from("-x"),
+            String::from("baz"),
+            String::from("--verbose"),
+            String::from("--"),
+            String::from("arg"),
+            String::from("--version"),
+            String::from("--help"),
+        ];
+        
+        let expected = &[a_foo, a_foobar, a_help, a_version, a_verbose, a_exclude,
+             a_passed];
+    
+        let mut parse = Parse::new(expected, &args).expect("Invalid definitions");
+                
+        assert_eq!(parse.next(), Some(Ok(Positional{ name: "foo", value: "foo"})));
+        assert_eq!(parse.next(), Some(Ok(Trail { value: "bar"})));
+        assert_eq!(parse.next(), Some(Ok(Option { name: "exclude", value: "baz" })));
+        assert_eq!(parse.next(), Some(Ok(Switch { name: "verbose" })));
+        assert_eq!(parse.next(), Some(Ok(Switch { name: "" })));
+        assert_eq!(parse.next(), Some(Ok(Trail { value: "arg" })));
+        assert_eq!(parse.next(), Some(Ok(Switch { name: "version" })));
+        assert_eq!(parse.next(), Some(Ok(Switch { name: "help" })));
+        assert_eq!(parse.next(), None);
     }
 }

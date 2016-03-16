@@ -33,16 +33,6 @@ fn main() {
     
     // Avoid consuming the parse iterator, in order to get the remaining
     // arguments when encountering the '--' flag
-    /*let args = vec![
-        String::from("foo"),
-        String::from("bar"),
-        String::from("-x"),
-        String::from("baz"),
-        String::from("--verbose"),
-        String::from("--"),
-        String::from("arg"),
-        String::from("--help]"),
-    ];*/
     let mut parse = Parse::new(expected, &args).expect("Invalid definitions");
     while let Some(item) = parse.next() {
         match item {
