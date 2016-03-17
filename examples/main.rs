@@ -27,7 +27,8 @@ fn main() {
     let mut exclude = None;
     let mut passed = None;
     
-    let usage = "Usage: cargo run --example main -- [--help | OPTIONS ] foo [foobar, ...]";
+    const USAGE: &'static str = "Usage: cargo run --example main -- \
+        [--help | OPTIONS ] foo [foobar, ...]";
     let expected = &[a_foo, a_foobar, a_help, a_version, a_verbose, a_exclude,
          a_passed];
     
@@ -38,28 +39,28 @@ fn main() {
         match item {
             Err(err) => {
                 println!("Parse error: {:?}", err);
-                println!("{}", usage);
+                println!("{}", USAGE);
                 return;
             },
-            Ok(Positional { name: "foo", value }) => {
+            Ok(Positional("foo", value)) => {
                 foo = value;
             },
-            Ok(Trail { value }) => {
+            Ok(TrailPart(value)) => {
                 foobar.push(value);
             },
-            Ok(Switch { name: "help" }) => {
-                return println!("{}\n\n{}", usage, "No help atm.");
+            Ok(Switch("help")) => {
+                return println!("{}\n\n{}", USAGE, "No help atm.");
             },
-            Ok(Switch { name: "version" }) => {
+            Ok(Switch("version")) => {
                 return println!("{}", env!("CARGO_PKG_VERSION"));
             },
-            Ok(Switch { name: "verbose" }) => {
+            Ok(Switch("verbose")) => {
                 verbose = true;
             },
-            Ok(Option { name: "exclude", value }) => {
+            Ok(Option("exclude", value)) => {
                 exclude = Some(value);
             },
-            Ok(Switch { name: "" }) => {
+            Ok(Switch("")) => {
                 passed = Some(parse.remainder());
                 break;
             },

@@ -5,10 +5,14 @@ use std::collections::{HashMap, HashSet};
 // Lifetime 'a is the "definitions" and 'b is the "arguments".
 #[derive(Debug, PartialEq)]
 pub enum Arg<'a, 'b> {
-    Positional { name: &'a str, value: &'b str },
-    Trail { value: &'b str },
-    Switch { name: &'a str },
-    Option { name: &'a str, value: &'b str },
+    /// The name and value of a found positional.
+    Positional(&'a str, &'b str),
+    /// The value of a found trail argument (may occur multiple times).
+    TrailPart(&'b str),
+    /// The name of a found switch ("help" for ```--help```).
+    Switch(&'a str),
+    /// The name and value of an optional argument.
+    Option(&'a str, &'b str),
 }
 
 /// The name of an optional argument.
@@ -242,7 +246,7 @@ impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
         use self::ParseError::*;
         match *opt_type {
             Switch => {
-                Ok(Arg::Switch { name: name })
+                Ok(Arg::Switch(name))
             },
             Option => {
                 if self.args.is_empty() {
@@ -258,7 +262,7 @@ impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
                             self.finished = true;
                             Err(MissingParameter(name.clone()))
                         } else {
-                            Ok(Arg::Option { name: name, value: string })
+                            Ok(Arg::Option(name, string))
                         }
                     } else {
                         self.finished = true;
@@ -300,7 +304,7 @@ impl<'a, 'b, T: 'b + Borrow<str>> Iterator for Parse<'a, 'b, T> {
                 self.finished = true;
                 return Some(Err(GroupedNonSwitch(short, self.args[index].borrow())));
             } else {
-                return Some(Ok(Switch { name: name }));
+                return Some(Ok(Switch(name)));
             }
         }
         
@@ -364,12 +368,12 @@ impl<'a, 'b, T: 'b + Borrow<str>> Iterator for Parse<'a, 'b, T> {
             if self.next_position < self.positional.len() {
                 let position = self.positional[self.next_position];
                 self.next_position += 1;
-                return Some(Ok(Positional { name: position, value: string }));
+                return Some(Ok(Positional(position, string)));
             
             // Trail
             } else if let Some(_) = self.trail {
                 self.trail_args_found += 1;
-                return Some(Ok(Trail { value: string }));
+                return Some(Ok(TrailPart(string)));
             
             // No trail
             } else {
