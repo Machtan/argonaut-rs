@@ -18,7 +18,9 @@ pub enum Arg<'a, 'b> {
 /// The name of an optional argument.
 #[derive(Debug, Clone)]
 pub enum OptName<T: Borrow<str>> {
+    /// ```--help```.
     Long(T),
+    /// ```--help``` | ```-h```.
     LongAndShort(T, char),
 }
 
@@ -36,71 +38,100 @@ impl<T: Borrow<str>> OptName<T> {
 /// The different argument structures to expect.
 #[derive(Debug, Clone)]
 pub enum DefType<T: Borrow<str>> {
+    /// A positional argument.
     Positional { name: T },
-    Trail(TrailType),
+    /// A trail. The parameter is only used for help messages.
+    Trail { trail: TrailType, parameter: Option<T> },
+    /// A switch.
     Switch { name: OptName<T> },
-    Option { name: OptName<T> },
+    /// An option. The parameter is only used for help messages.
+    Option { name: OptName<T>, parameter: Option<T> },
 }
 
+/// A partially specified argument definition.
 #[must_use = "The argument definition is only partially constructed"]
 pub struct PartialArgDef<T: Borrow<str>> {
+    /// The name that was specified for this argument.
     pub name: OptName<T>
 }
 
 impl<T: Borrow<str>> PartialArgDef<T> {
+    /// Creates a new ```switch``` definition.
     pub fn switch(self) -> ArgDef<T> {
         ArgDef::new(DefType::Switch { name: self.name })
     }
     
+    /// Creates a new ```option``` definition.
+    /// This is a type of flag that takes a single parameter.
     pub fn option(self) -> ArgDef<T> {
-        ArgDef::new(DefType::Option { name: self.name })
+        ArgDef::new(DefType::Option { name: self.name, parameter: None })
     }
 }
 
 /// The definition of one or more arguments to expect when parsing.
 #[derive(Debug, Clone)]
 pub struct ArgDef<T: Borrow<str>> {
+    /// The type/data of the definition.
     pub deftype: DefType<T>,
+    /// An optional help string.
     pub help: Option<T>,
-    pub parameter: Option<T>,
 }
 
 impl<T: Borrow<str>> ArgDef<T> {
+    /// Creates a new argument definition.
     fn new(deftype: DefType<T>) -> ArgDef<T> {
         ArgDef {
             deftype: deftype,
             help: None,
-            parameter: None,
         }
     } 
     
+    /// Creates the definition for a positional argument with the given name.
     pub fn positional(name: T) -> ArgDef<T> {
         ArgDef::new(DefType::Positional { name: name })
     }
     
+    /// Creates the definition for a trail of one or more arguments.
     pub fn required_trail() -> ArgDef<T> {
-        ArgDef::new(DefType::Trail(TrailType::OnePlus))
+        ArgDef::new(DefType::Trail { trail: TrailType::OnePlus, parameter: None })
     }
     
+    /// Creates the definition for a trail of zero or more arguments.
     pub fn optional_trail() -> ArgDef<T> {
-        ArgDef::new(DefType::Trail(TrailType::ZeroPlus))
+        ArgDef::new(DefType::Trail{ trail: TrailType::ZeroPlus, parameter: None })
     }
     
+    /// Starts creating a new optional argument with the given long name.
+    /// This means that this definition is used when the name is given as an
+    /// argument, prefixed with two dashes (eg. "help" => ```--help```).
     pub fn named(name: T) -> PartialArgDef<T> {
         PartialArgDef { name: OptName::Long(name) }
     }
     
+    /// Starts creating a new optional argument with the given long name.
+    /// This means that this definition is used when the name is given as an
+    /// argument, prefixed with two dashes (eg. "help" => ```--help```).
+    /// The short argument is for single-character abbreviations 
+    /// (eg. "a" => ```-a```).
     pub fn named_and_short(name: T, short: char) -> PartialArgDef<T> {
         PartialArgDef { name: OptName::LongAndShort(name, short) }
     }
     
+    /// Sets the help message for this argument.
     pub fn set_help(&mut self, help: T) -> &mut Self {
         self.help = Some(help);
         self
     }
     
+    /// Sets the parameter name for this argument (used for help messages).
     pub fn set_parameter(&mut self, param: T) -> &mut Self {
-        self.parameter = Some(param);
+        use self::DefType::*;
+        match self.deftype {
+            Trail { ref mut parameter, ..} | Option { ref mut parameter, ..} => {
+                *parameter = Some(param);
+            },
+            _ => {}
+        }
         self
     }
 }
@@ -108,15 +139,23 @@ impl<T: Borrow<str>> ArgDef<T> {
 /// The types of argument trails to expect.
 #[derive(Debug, Clone)]
 pub enum TrailType {
+    /// One or more arguments.
     OnePlus,
+    /// Zero or more arguments.
     ZeroPlus,
 }
 
 /// An error found when defining the expected argument structure.
 #[derive(Debug, PartialEq)]
 pub enum DefinitionError<'a> {
+    /// Two optional arguments have the same short name (eg: both ```--verbose```
+    /// and ```--version``` using ```-v```).
     SameShortName(&'a str, &'a str),
-    DefinedTwice(&'a str),
+    /// The optional name is defined twice.
+    OptionDefinedTwice(&'a str),
+    /// The positional name is defined twice.
+    PositionalDefinedTwice(&'a str),
+    /// Two trail definitions were given.
     TwoTrailsDefined,
 }
 
@@ -130,12 +169,20 @@ enum OptType {
 /// An error found when parsing.
 #[derive(Debug, PartialEq)]
 pub enum ParseError<'a, 'b> {
+    /// The positional argument with this name was not found.
     MissingPositional(&'a str),
+    /// The required parameter of this option was not found.
     MissingParameter(&'a str),
+    /// No trail arguments were found, but they were expected.
     MissingTrail,
+    /// No more positionals was expected, but this argument was found.
     UnexpectedPositional(&'b str),
+    /// This short (```-h```) flag was not defined.
     UnexpectedShortArgument(char, &'b str),
+    /// This long (```--help```) flag was not defined.
     UnexpectedLongArgument(&'b str),
+    /// A short flag of an option taking a parameter was grouped with others.
+    /// eg. ```-x ARG``` was instead grouped as ```-abcdx ARG```.
     GroupedNonSwitch(char, &'b str),
 }
 
@@ -168,7 +215,7 @@ impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
             OptName::Long(ref long) => {
                 let name = long.borrow();
                 if used_names.contains(name) {
-                    return Err(DefinedTwice(name));
+                    return Err(OptionDefinedTwice(name));
                 } else {
                     used_names.insert(name);
                 }
@@ -176,7 +223,7 @@ impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
             OptName::LongAndShort(ref long, short) => {
                 let name = long.borrow();
                 if used_names.contains(name) {
-                    return Err(DefinedTwice(name));
+                    return Err(OptionDefinedTwice(name));
                 } else {
                     used_names.insert(name);
                 }
@@ -203,12 +250,18 @@ impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
         
         let mut aliases = HashMap::new();
         let mut used_names = HashSet::new();
+        let mut used_positional_names = HashSet::new();
         for def in expected {
             match def.deftype {
                 Positional { ref name } => {
-                    positional.push(name.borrow());
+                    if used_positional_names.contains(name.borrow()) {
+                        return Err(PositionalDefinedTwice(name.borrow()));
+                    } else {
+                        positional.push(name.borrow());
+                        used_positional_names.insert(name.borrow());
+                    }
                 },
-                Trail(ref trail_type) => {
+                Trail{ trail: ref trail_type, .. } => {
                     if trail.is_some() {
                         return Err(TwoTrailsDefined);
                     } else {
@@ -219,7 +272,7 @@ impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
                     try!(Parse::<T>::add_name(name, &mut aliases, &mut used_names));
                     options.insert(name.borrow_long().clone(), OptType::Switch);
                 },
-                Option { ref name } => {
+                Option { ref name, .. } => {
                     try!(Parse::<T>::add_name(name, &mut aliases, &mut used_names));
                     options.insert(name.borrow_long().clone(), OptType::Option);
                 },
