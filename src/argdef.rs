@@ -4,72 +4,21 @@ use std::borrow::Cow;
 use std::rc::Rc;
 use help::Help;
 use parse::ParseError;
-
-/// Allows every type that is FromStr to be read from an argument.
-pub trait SingleTarget: Debug {
-    /// Parses the value and updates self with it.
-    fn parse(&mut self, value: &str) -> Result<(), String>;
-}
-
-impl<T> SingleTarget for T where T: Debug + FromStr {
-    // TODO: Better info here.
-    fn parse(&mut self, value: &str) -> Result<(), String> {
-        let value = match <T as FromStr>::from_str(value) {
-            Ok(val) => val,
-            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
-        };
-        *self = value;
-        Ok(())
-    }
-}
-
-/// Allows every type that is FromStr to be read from an argument.
-pub trait OptionTarget: Debug {
-    /// Parses the value and updates self with it.
-    fn parse(&mut self, value: &str) -> Result<(), String>;
-}
-
-impl<T> OptionTarget for Option<T> where T: Debug + FromStr {
-    // TODO: Better info here.
-    fn parse(&mut self, value: &str) -> Result<(), String> {
-        let value = match <T as FromStr>::from_str(value) {
-            Ok(val) => val,
-            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
-        };
-        *self = Some(value);
-        Ok(())
-    }
-}
-
-/// Allows a collection to be extended with values read from arguments.
-pub trait CollectionTarget: Debug {
-    /// Parses the value and adds it to this collection.
-    fn parse_and_add(&mut self, value: &str) -> Result<(), String>;
-}
-
-impl<T> CollectionTarget for Vec<T> where T: Debug + FromStr {
-    fn parse_and_add(&mut self, value: &str) -> Result<(), String> {
-        let value = match <T as FromStr>::from_str(value) {
-            Ok(val) => val,
-            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
-        };
-        self.push(value);
-        Ok(())
-    }
-}
+use std::collections::{BinaryHeap, BTreeSet, HashSet, LinkedList, VecDeque};
+use std::hash::Hash;
 
 pub type SubCmd<'def> = Box<FnMut(String, &[&str]) -> Result<(), ParseError<'def>>>;
 
 /// The description of an expected argument.
 //#[derive(Debug)]
 pub struct ArgDef<'def, 'tar> {
-    pub name: Cow<'def, str>,
-    pub kind: ArgDefKind<'def, 'tar>,
-    pub help_desc: Option<Cow<'def, str>>,
+    pub(crate) name: Cow<'def, str>,
+    pub(crate) kind: ArgDefKind<'def, 'tar>,
+    pub(crate) help_desc: Option<Cow<'def, str>>,
 }
 
 //#[derive(Debug)]
-pub enum ArgDefKind<'def, 'tar> {
+pub(crate) enum ArgDefKind<'def, 'tar> {
     Positional { 
         target: &'tar mut SingleTarget,
     },
@@ -209,5 +158,113 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
     pub fn help<N>(mut self, help: N) -> Self where N: Into<Cow<'def, str>> {
         self.help_desc = Some(help.into());
         self
+    }
+}
+
+/// Allows every type that is FromStr to be read from an argument.
+pub trait SingleTarget: Debug {
+    /// Parses the value and updates self with it.
+    fn parse(&mut self, value: &str) -> Result<(), String>;
+}
+
+impl<T> SingleTarget for T where T: Debug + FromStr {
+    // TODO: Better info here.
+    fn parse(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        *self = value;
+        Ok(())
+    }
+}
+
+/// Allows every type that is FromStr to be read from an argument.
+pub trait OptionTarget: Debug {
+    /// Parses the value and updates self with it.
+    fn parse(&mut self, value: &str) -> Result<(), String>;
+}
+
+impl<T> OptionTarget for Option<T> where T: Debug + FromStr {
+    // TODO: Better info here.
+    fn parse(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        *self = Some(value);
+        Ok(())
+    }
+}
+
+/// Allows a collection to be extended with values read from arguments.
+pub trait CollectionTarget: Debug {
+    /// Parses the value and adds it to this collection.
+    fn parse_and_add(&mut self, value: &str) -> Result<(), String>;
+}
+
+impl<T> CollectionTarget for Vec<T> where T: Debug + FromStr {
+    fn parse_and_add(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        self.push(value);
+        Ok(())
+    }
+}
+
+impl<T> CollectionTarget for BinaryHeap<T> where T: Debug + FromStr + Ord {
+    fn parse_and_add(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        self.push(value);
+        Ok(())
+    }
+}
+
+impl<T> CollectionTarget for BTreeSet<T> where T: Debug + FromStr + Ord {
+    fn parse_and_add(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        self.insert(value);
+        Ok(())
+    }
+}
+
+impl<T> CollectionTarget for HashSet<T> where T: Debug + FromStr + Hash + Eq {
+    fn parse_and_add(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        self.insert(value);
+        Ok(())
+    }
+}
+
+impl<T> CollectionTarget for LinkedList<T> where T: Debug + FromStr {
+    fn parse_and_add(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        self.push_back(value);
+        Ok(())
+    }
+}
+
+impl<T> CollectionTarget for VecDeque<T> where T: Debug + FromStr {
+    fn parse_and_add(&mut self, value: &str) -> Result<(), String> {
+        let value = match <T as FromStr>::from_str(value) {
+            Ok(val) => val,
+            Err(_) => return Err(format!("Could not parse and convert '{}'", value)),
+        };
+        self.push_back(value);
+        Ok(())
     }
 }

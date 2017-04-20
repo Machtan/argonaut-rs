@@ -193,6 +193,7 @@ pub fn parse_definitions<'def, 'tar>(defs: Vec<ArgDef<'def, 'tar>>)
     Ok(ParseState { positional, trail, subcommands, options, short_map })
 }
 
+/// An error found when parsing arguments.
 #[derive(Debug)]
 pub enum ParseError<'def> {
     /// The given argument definitions aren't valid.

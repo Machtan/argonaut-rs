@@ -21,7 +21,7 @@ mod argdef;
 mod help;
 mod parse;
 
-pub use argdef::{ArgDef, ArgDefKind, SingleTarget, CollectionTarget, OptionTarget};
+pub use argdef::{ArgDef, SingleTarget, CollectionTarget, OptionTarget};
 pub use parse::{parse, parse_plain, ParseError};
 
 use std::borrow::{Cow};
@@ -43,7 +43,6 @@ return success
 
 /*
 Tasks
-- Implement multi-target for all std::collections
 - Let parse results pass either Option<i32> or Option<T> to facilitate 'outer' abort.
 
 Optional
@@ -59,6 +58,7 @@ Done
 - Simple subcommand abstraction
 - Validate 'short' identifiers
 - Change default parse function to write usage (no parse_subcommand)
+- Implement multi-target for all std::collections
 
 Abandoned
 - Make a default handler function for parse results.
