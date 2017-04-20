@@ -230,7 +230,7 @@ impl<'def> ParseError<'def> {
 /// This version does not print usage in the case of parse errors, nor does 
 /// it 'un-propagate' parsing errors.
 pub fn parse_plain<'def, 'tar, T, P: Into<String>>(program: P, args: &[T], definitions: Vec<ArgDef<'def, 'tar>>) 
-    -> Result<(), ParseError<'def>>
+    -> Result<Option<i32>, ParseError<'def>>
   where T: Borrow<str> 
 { 
     let program = program.into();
@@ -296,7 +296,7 @@ pub fn parse_plain<'def, 'tar, T, P: Into<String>>(program: P, args: &[T], defin
         return ParseError::parse(format!("No subcommand specified"), help);
     }
     
-    Ok(())
+    Ok(None)
 }
 
 /// Parses the given arguments and updates the defined variables with them.
@@ -306,7 +306,7 @@ pub fn parse_plain<'def, 'tar, T, P: Into<String>>(program: P, args: &[T], defin
 /// - Parse failed: Print usage and prevent the error from propagating.
 /// - Interrupt or sub parse failed: Just passed along.
 pub fn parse<'def, 'tar, T, P: Into<String>>(program: P, args: &[T], definitions: Vec<ArgDef<'def, 'tar>>) 
-    -> Result<(), ParseError<'def>>
+    -> Result<Option<i32>, ParseError<'def>>
   where T: Borrow<str> 
 { 
     match parse_plain(program, args, definitions) {

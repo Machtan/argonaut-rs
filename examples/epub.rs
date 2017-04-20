@@ -61,7 +61,7 @@ fn epub_main() -> Option<i32> {
             
             create_epub(&spec_file, target_path, is_raw_spec);
             
-            Ok(())
+            Ok(None)
         })
         .help("Creates a new ePub from a given specification."),
         
@@ -70,7 +70,7 @@ fn epub_main() -> Option<i32> {
             
             print_spec_template();
             
-            Ok(())
+            Ok(None)
         })
         .help("Prints a template for an ePub specification file."),
         
@@ -90,7 +90,7 @@ fn epub_main() -> Option<i32> {
             
             create_epub_from_folder(&folder);
             
-            Ok(())
+            Ok(None)
         })
         .help("Creates a simple ePub from the images in the given folder."),
         

@@ -43,7 +43,6 @@ return success
 
 /*
 Tasks
-- Let parse results pass either Option<i32> or Option<T> to facilitate 'outer' abort.
 
 Optional
 - Implement a validate->assign->modify procedure in parse
@@ -59,6 +58,7 @@ Done
 - Validate 'short' identifiers
 - Change default parse function to write usage (no parse_subcommand)
 - Implement multi-target for all std::collections
+- Let parse results pass either Option<i32> or Option<T> to facilitate 'outer' abort.
 
 Abandoned
 - Make a default handler function for parse results.
