@@ -67,10 +67,10 @@ impl<'def> Help<'def> {
                         HelpOptKind::Count, def.help_desc.clone()
                     ));
                 }
-                ArgDefKind::OptArg { ref short, ref param, .. } => {
+                ArgDefKind::Setting { ref short, ref param, .. } => {
                     options.push((
                         def.name.clone(), short.clone(), 
-                        HelpOptKind::OptArg(param.clone()), def.help_desc.clone()
+                        HelpOptKind::Setting(param.clone()), def.help_desc.clone()
                     ));
                 }
                 ArgDefKind::Collect { ref short, ref param, .. } => {
@@ -256,7 +256,7 @@ impl<'def> Help<'def> {
                 
                 // Argument
                 match *kind {
-                    HelpOptKind::OptArg(ref param)
+                    HelpOptKind::Setting(ref param)
                     | HelpOptKind::Collect(ref param) => {
                         s.push(' ');
                         if let &Some(ref param) = param {
@@ -306,7 +306,7 @@ pub enum HelpOptKind<'def> {
     Count,
     /// An option with a value. `./bin --eat-cake yes` 
     /// (optionally with a parameter name).
-    OptArg(Option<Cow<'def, str>>),
+    Setting(Option<Cow<'def, str>>),
     /// An interrupt. `./bin --help`
     Interrupt,
     /// An argument appearing multiple times `./bin -i 'foo.rs' -i 'bar.rs'`. 

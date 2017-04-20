@@ -42,7 +42,7 @@ pub(crate) enum ArgDefKind<'def, 'tar> {
         short: Option<Cow<'def, str>>,
         param: Option<Cow<'def, str>>,
     },
-    OptArg {
+    Setting {
         target: &'tar mut OptionTarget,
         short: Option<Cow<'def, str>>,
         param: Option<Cow<'def, str>>,
@@ -65,35 +65,39 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
         }
     }
     
-    /// Creates a descrption of a required positional argument.
+    /// Defines a required positional argument.
     ///
     /// The target value will be updated after the parse, as long as the parse 
     /// succeeds and is not interrupted by an `interrupt`-type argument.
-    pub fn pos<N>(name: N, target: &'tar mut SingleTarget) -> ArgDef<'def, 'tar> 
+    pub fn positional<N>(name: N, target: &'tar mut SingleTarget) -> ArgDef<'def, 'tar> 
       where N: Into<Cow<'def, str>> 
     {
         ArgDef::new(name, ArgDefKind::Positional { target })
     }
     
-    /// Creates a description of a `trail`-type argument.
+    /// Defines a 'trail'-type argument.
     ///
     /// The trail is a collection of the remaining positional arguments, after
-    /// all defined ones have been passed. The trail can be set to be optional.
+    /// all the defined ones have been assigned. 
+    /// The trail can optional or mandatory (0+ or 1+ arguments expected).
     pub fn trail<N>(name: N, optional: bool, target: &'tar mut CollectionTarget) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>>
     {
         ArgDef::new(name, ArgDefKind::Trail { optional, target })
     }
     
-    /// Creates a description of a subcommand.
-    pub fn cmd<N, F>(name: N, handler: F) -> ArgDef<'def, 'tar>
+    /// Defines a subcommand.
+    /// 
+    /// Subcommands cannot be mixed with positional (or trail) arguments in the 
+    /// same parse.
+    pub fn subcommand<N, F>(name: N, handler: F) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>>,
             F: 'static + FnMut(String, &[&str]) -> Result<Option<i32>, ParseError<'def>>
     {
         ArgDef::new(name, ArgDefKind::Subcommand { handler: Box::new(handler) })
     }
     
-    /// Creates a description of an `interrupt`-type argument.
+    /// Defines an `interrupt`-type argument.
     ///
     /// When the identifier for this argument is passed, the callback is run,
     /// and the parsing is interrupted. This is for options that should interrupt
@@ -106,16 +110,18 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
         })
     }
     
-    /// Creates a description of an `option`-type argument.
+    /// Defines a 'setting'-type argument.
     /// 
-    /// If an argument is given, the target is set to Some(<parsed value>).
-    pub fn option<N>(name: N, target: &'tar mut OptionTarget) -> ArgDef<'def, 'tar>
+    /// A optional setting that can only be set once.
+    /// 
+    /// The target should be an Option<T> where T: FromStr + Debug.
+    pub fn setting<N>(name: N, target: &'tar mut OptionTarget) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>>
     {
-        ArgDef::new(name, ArgDefKind::OptArg { short: None, param: None, target })
+        ArgDef::new(name, ArgDefKind::Setting { short: None, param: None, target })
     }
     
-    /// Creates a description of a `flag`-type argument.
+    /// Defines a 'flag'-type argument.
     /// 
     /// This will set its target to true, when passed as an argument.
     pub fn flag<N>(name: N, target: &'tar mut bool) -> ArgDef<'def, 'tar>
@@ -124,22 +130,22 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
         ArgDef::new(name, ArgDefKind::Flag { short: None, target })
     }
     
-    /// Creates a description of a `count`-type argument.
+    /// Creates a description of a `counter`-type argument.
     /// 
     /// This will count the number of times the flag was passed in the arguments.
-    pub fn count<N>(name: N, target: &'tar mut usize) -> ArgDef<'def, 'tar>
+    pub fn counter<N>(name: N, target: &'tar mut usize) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>> 
     {
         ArgDef::new(name, ArgDefKind::Count { short: None, target })
     }
     
-    /// Defines a 'collection'-type argument.
+    /// Defines a 'collector'-type argument.
     /// 
     /// The flag can be given multiple times, and each argument to it will
     /// be added to a collection variable. (ie: a Vec)
     /// 
     /// `gcc -i foo.h -i bar.h` => vec!["foo.h", "bar.h"]`
-    pub fn collect<N>(name: N, target: &'tar mut CollectionTarget) -> ArgDef<'def, 'tar>
+    pub fn collector<N>(name: N, target: &'tar mut CollectionTarget) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>> 
     {
         ArgDef::new(name, ArgDefKind::Collect { short: None, param: None, target })
@@ -164,7 +170,7 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
             },
             Flag { target, .. } => Flag { short: Some(short.into()), target },
             Count { target, .. } => Count { short: Some(short.into()), target },
-            OptArg { target, param, .. } => OptArg { short: Some(short.into()), target, param },
+            Setting { target, param, .. } => Setting { short: Some(short.into()), target, param },
             Interrupt { callback, .. } => Interrupt { short: Some(short.into()), callback },
             Collect { target, param, .. } => Collect { short: Some(short.into()), target, param },
         };
@@ -177,8 +183,8 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
     pub fn param<N>(mut self, parameter_name: N) -> Self where N: Into<Cow<'def, str>> {
         use self::ArgDefKind::*;
         self.kind = match self.kind {
-            OptArg { target, short, .. } => {
-                OptArg { target, short, param: Some(parameter_name.into()) }
+            Setting { target, short, .. } => {
+                Setting { target, short, param: Some(parameter_name.into()) }
             }
             Collect { target, short, .. } => {
                 Collect { target, short, param: Some(parameter_name.into()) }

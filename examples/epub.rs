@@ -30,16 +30,21 @@ fn epub_main() -> Option<i32> {
     ";
     
     match parse("epub", &args, vec![
-        ArgDef::cmd("create", |program, args| {
+        // Defines a subcommand named 'create' that will run the given closure
+        // or function when it is encountered during a parse.
+        
+        // The 'program' argument is a String with the name of the command that
+        // is currently running, in this case "epub create".
+        ArgDef::subcommand("create", |program, args| {
             let mut spec_file = String::new();
             let mut target_path: Option<String> = None;
             let mut is_raw_spec = false;
             
             parse(program, args, vec![
-                ArgDef::pos("spec_file", &mut spec_file)
+                ArgDef::positional("spec_file", &mut spec_file)
                     .help("The TOML specification of the book"),
                 
-                ArgDef::option("target_path", &mut target_path).short("t")
+                ArgDef::setting("target_path", &mut target_path).short("t")
                     .help("
                         A specific path to compile the ePub to. Defaults to a
                         name/author coupling in the current working directory
@@ -51,21 +56,33 @@ fn epub_main() -> Option<i32> {
                         specification file, instead of a path to it.
                     "),
                 
+                // This creates a simple 'interrupt' flag for '--help' that
+                // shows help for this subcommand with the given description.
                 help_arg("
                     Compiles an ePub from a markdown source and a TOML specification. The files in
                     the specification are sought relatively to the location of the specification
                     file, so use absolute paths when needed. If no arguments are given, the
                     created file will be found in the active working directory.
-                "),
-            ])?;
+                ") 
+                // The common short form '-h' is not bound by default.
+                .short("h"), 
+            ])?; 
+            // The subcommand closure returns the same type as 'parse', so this
+            // is the expected way to handle subparsing.
             
+            // The parse has succeeded and all required values assigned.
             create_epub(&spec_file, target_path, is_raw_spec);
             
+            // In this simple example, no error code is returned.
+            
+            // But if create_epub for instance checked whether the folder existed
+            // an error code for that might be passed here, so that 'main' could
+            // call process::exit with it later.
             Ok(None)
         })
         .help("Creates a new ePub from a given specification."),
         
-        ArgDef::cmd("example", |program, args| {
+        ArgDef::subcommand("example", |program, args| {
             parse(program, args, vec![])?;
             
             print_spec_template();
@@ -74,11 +91,11 @@ fn epub_main() -> Option<i32> {
         })
         .help("Prints a template for an ePub specification file."),
         
-        ArgDef::cmd("from_folder", |program, args| {
+        ArgDef::subcommand("from_folder", |program, args| {
             let mut folder = String::new();
             
             parse(program, args, vec![
-                ArgDef::pos("folder", &mut folder)
+                ArgDef::positional("folder", &mut folder)
                     .help("The folder to load images from."),
                 
                 help_arg(
@@ -96,7 +113,11 @@ fn epub_main() -> Option<i32> {
         
         help_arg(description).short("h"),
         version_arg(),
-    ]) {
+    ]) 
+    // This is probably how any subcommand-parsing function should look
+    // Ok and Interrupt means that it terminated as expected.
+    // Otherwise return an error code to be set with process::exit.
+    {
         Ok(_) => None,
         Err(ParseError::Interrupted(_)) => None,
         Err(_) => Some(1),

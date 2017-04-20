@@ -9,7 +9,7 @@ use std::rc::Rc;
 pub enum TargetRef<'def, 'tar> {
     Flag(&'tar mut bool),
     Count(&'tar mut usize),
-    OptArg(&'tar mut OptionTarget),
+    Setting(&'tar mut OptionTarget),
     Interrupt(Box<FnMut(Rc<Help<'def>>)>),
     Collect(&'tar mut CollectionTarget),
 }
@@ -65,7 +65,7 @@ impl<'def, 'tar> ParseState<'def, 'tar> {
             (_, &mut Count(ref mut target)) => {
                 **target += 1;
             }
-            (ref name, &mut OptArg(ref mut target)) => {
+            (ref name, &mut Setting(ref mut target)) => {
                 if given_values.contains(name) {
                     return ParseError::parse(format!("Option '{}' given twice!", name), help);
                 }
@@ -179,8 +179,8 @@ pub fn parse_definitions<'def, 'tar>(defs: Vec<ArgDef<'def, 'tar>>)
             ArgDefKind::Collect { short, target, .. } => {
                 add_option(def.name, short, TargetRef::Collect(target), &mut options, &mut short_map)?;
             }
-            ArgDefKind::OptArg { short, target, .. } => {
-                add_option(def.name, short, TargetRef::OptArg(target), &mut options, &mut short_map)?;
+            ArgDefKind::Setting { short, target, .. } => {
+                add_option(def.name, short, TargetRef::Setting(target), &mut options, &mut short_map)?;
             }
             ArgDefKind::Interrupt { short, callback } => {
                 add_option(def.name, short, TargetRef::Interrupt(callback), &mut options, &mut short_map)?;
