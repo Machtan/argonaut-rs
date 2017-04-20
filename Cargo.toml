@@ -1,6 +1,6 @@
 [package]
 name = "argonaut"
-version = "0.11.0"
+version = "0.12.0"
 authors = ["Jakob Lautrup Nysom <jako3047@gmail.com>"]
 description = "A simple argument parser"
 readme = "README.md"

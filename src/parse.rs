@@ -1,560 +1,322 @@
-use std::borrow::{Borrow};
-use std::collections::{HashMap, HashSet};
+use argdef::{SingleTarget, CollectionTarget, OptionTarget, ArgDef, ArgDefKind, SubCmd};
+use help::Help;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::borrow::{Cow, Borrow};
+use std::rc::Rc;
 
-/// A parsed argument.
-// Lifetime 'a is the "definitions" and 'b is the "arguments".
-#[derive(Debug, PartialEq)]
-pub enum Arg<'a, 'b> {
-    /// The name and value of a found positional.
-    Positional(&'a str, &'b str),
-    /// The value of a found trail argument (may occur multiple times).
-    TrailPart(&'b str),
-    /// The name of a found switch ("help" for ```--help```).
-    Switch(&'a str),
-    /// The name and value of an optional argument.
-    Option(&'a str, &'b str),
+/// References to the targets of non-positional arguments.
+//#[derive(Debug)]
+pub enum TargetRef<'def, 'tar> {
+    Flag(&'tar mut bool),
+    Count(&'tar mut usize),
+    OptArg(&'tar mut OptionTarget),
+    Interrupt(Box<FnMut(Rc<Help<'def>>)>),
 }
 
-/// The name of an optional argument.
-#[derive(Debug, Clone)]
-pub enum OptName<T: Borrow<str>> {
-    /// ```--help```.
-    Long(T),
-    /// ```--help``` | ```-h```.
-    LongAndShort(T, char),
+/// Sorted argument definitions. Updated mutably during the parse.
+//#[derive(Debug)]
+pub struct ParseState<'def, 'tar> {
+    positional: VecDeque<(Cow<'def, str>, &'tar mut SingleTarget)>,
+    // (satisfied, target)
+    trail: Option<(Cow<'def, str>, bool, &'tar mut CollectionTarget)>,
+    subcommands: HashMap<Cow<'def, str>, SubCmd<'def>>,
+    options: HashMap<Cow<'def, str>, TargetRef<'def, 'tar>>,
+    short_map: HashMap<Cow<'def, str>, Cow<'def, str>>,
 }
 
-impl<T: Borrow<str>> OptName<T> {
-    /// The 'long' component of the name.
-    pub fn borrow_long<'a>(&'a self) -> &'a str {
-        match *self {
-            OptName::Long(ref name) | OptName::LongAndShort(ref name, _) => {
-                name.borrow()
-            },
-        }
-    }
-}
-
-/// The different argument structures to expect.
-#[derive(Debug, Clone)]
-pub enum DefType<T: Borrow<str>> {
-    /// A positional argument.
-    Positional { name: T },
-    /// A trail. The parameter is only used for help messages.
-    Trail { trail: TrailType, parameter: Option<T> },
-    /// A switch.
-    Switch { name: OptName<T> },
-    /// An option. The parameter is only used for help messages.
-    Option { name: OptName<T>, parameter: Option<T> },
-}
-
-/// A partially specified argument definition.
-#[must_use = "The argument definition is only partially constructed"]
-pub struct PartialArgDef<T: Borrow<str>> {
-    /// The name that was specified for this argument.
-    pub name: OptName<T>
-}
-
-impl<T: Borrow<str>> PartialArgDef<T> {
-    /// Creates a new ```switch``` definition.
-    pub fn switch(self) -> ArgDef<T> {
-        ArgDef::new(DefType::Switch { name: self.name })
+impl<'def, 'tar> ParseState<'def, 'tar> {
+    /// Returns the internal object representing the given option name.
+    fn get_interned_name(&self, option: &str) -> Cow<'def, str> {
+        self.options.keys().find(|k| k.as_ref() == option).unwrap().clone()
     }
     
-    /// Creates a new ```option``` definition.
-    /// This is a type of flag that takes a single parameter.
-    pub fn option(self) -> ArgDef<T> {
-        ArgDef::new(DefType::Option { name: self.name, parameter: None })
-    }
-}
-
-/// The definition of one or more arguments to expect when parsing.
-#[derive(Debug, Clone)]
-pub struct ArgDef<T: Borrow<str>> {
-    /// The type/data of the definition.
-    pub deftype: DefType<T>,
-    /// An optional help string.
-    pub help: Option<T>,
-}
-
-impl<T: Borrow<str>> ArgDef<T> {
-    /// Creates a new argument definition.
-    fn new(deftype: DefType<T>) -> ArgDef<T> {
-        ArgDef {
-            deftype: deftype,
-            help: None,
-        }
-    } 
-    
-    /// Creates the definition for a positional argument with the given name.
-    pub fn positional(name: T) -> ArgDef<T> {
-        ArgDef::new(DefType::Positional { name: name })
-    }
-    
-    /// Creates the definition for a trail of one or more arguments.
-    pub fn required_trail() -> ArgDef<T> {
-        ArgDef::new(DefType::Trail { trail: TrailType::OnePlus, parameter: None })
-    }
-    
-    /// Creates the definition for a trail of zero or more arguments.
-    pub fn optional_trail() -> ArgDef<T> {
-        ArgDef::new(DefType::Trail{ trail: TrailType::ZeroPlus, parameter: None })
-    }
-    
-    /// Starts creating a new optional argument with the given long name.
-    /// This means that this definition is used when the name is given as an
-    /// argument, prefixed with two dashes (eg. "help" => ```--help```).
-    pub fn named(name: T) -> PartialArgDef<T> {
-        PartialArgDef { name: OptName::Long(name) }
-    }
-    
-    /// Starts creating a new optional argument with the given long name.
-    /// This means that this definition is used when the name is given as an
-    /// argument, prefixed with two dashes (eg. "help" => ```--help```).
-    /// The short argument is for single-character abbreviations 
-    /// (eg. "a" => ```-a```).
-    pub fn named_and_short(name: T, short: char) -> PartialArgDef<T> {
-        PartialArgDef { name: OptName::LongAndShort(name, short) }
-    }
-    
-    /// Sets the help message for this argument.
-    pub fn set_help(&mut self, help: T) -> &mut Self {
-        self.help = Some(help);
-        self
-    }
-    
-    /// Sets the parameter name for this argument (used for help messages).
-    pub fn set_parameter(&mut self, param: T) -> &mut Self {
-        use self::DefType::*;
-        match self.deftype {
-            Trail { ref mut parameter, ..} | Option { ref mut parameter, ..} => {
-                *parameter = Some(param);
-            },
-            _ => {}
-        }
-        self
-    }
-}
-
-/// The types of argument trails to expect.
-#[derive(Debug, Clone)]
-pub enum TrailType {
-    /// One or more arguments.
-    OnePlus,
-    /// Zero or more arguments.
-    ZeroPlus,
-}
-
-/// An error found when defining the expected argument structure.
-#[derive(Debug, PartialEq)]
-pub enum DefinitionError<'a> {
-    /// Two optional arguments have the same short name (eg: both ```--verbose```
-    /// and ```--version``` using ```-v```).
-    SameShortName(&'a str, &'a str),
-    /// The optional name is defined twice.
-    OptionDefinedTwice(&'a str),
-    /// The positional name is defined twice.
-    PositionalDefinedTwice(&'a str),
-    /// Two trail definitions were given.
-    TwoTrailsDefined,
-}
-
-/// The type of an optional argument.
-#[derive(Debug, Clone)]
-enum OptType {
-    Switch,
-    Option,
-}
-
-/// An error found when parsing.
-#[derive(Debug, PartialEq)]
-pub enum ParseError<'a, 'b> {
-    /// The positional argument with this name was not found.
-    MissingPositional(&'a str),
-    /// The required parameter of this option was not found.
-    MissingParameter(&'a str),
-    /// No trail arguments were found, but they were expected.
-    MissingTrail,
-    /// No more positionals was expected, but this argument was found.
-    UnexpectedPositional(&'b str),
-    /// This short (```-h```) flag was not defined.
-    UnexpectedShortArgument(char, &'b str),
-    /// This long (```--help```) flag was not defined.
-    UnexpectedLongArgument(&'b str),
-    /// A short flag of an option taking a parameter was grouped with others.
-    /// eg. ```-x ARG``` was instead grouped as ```-abcdx ARG```.
-    GroupedNonSwitch(char, &'b str),
-}
-
-/// A parse of a set of string arguments.
-// Lifetime 'a is the "definitions" and 'b is the "arguments".
-#[derive(Debug, Clone)]
-pub struct Parse<'a, 'b, T: 'b + Borrow<str>> {
-    args: &'b [T],
-    index: usize,
-    finished: bool,
-    positional: Vec<&'a str>,
-    next_position: usize,
-    trail: Option<TrailType>,
-    trail_args_found: usize,
-    options: HashMap<&'a str, OptType>, 
-    aliases: HashMap<char, &'a str>,
-    remaining_grouped_shorts: Vec<(usize, char)>,
-}
-
-
-
-impl<'a, 'b, T: 'b + Borrow<str>,> Parse<'a, 'b, T> {
-    
-    fn add_name<D>(name: &'a OptName<D>, aliases: &mut HashMap<char, &'a str>, 
-            used_names: &mut HashSet<&'a str>) 
-            -> Result<(), DefinitionError<'a>> 
-            where D: Borrow<str> {
-        use self::DefinitionError::*;
-        match *name {
-            OptName::Long(ref long) => {
-                let name = long.borrow();
-                if used_names.contains(name) {
-                    return Err(OptionDefinedTwice(name));
-                } else {
-                    used_names.insert(name);
-                }
-            },
-            OptName::LongAndShort(ref long, short) => {
-                let name = long.borrow();
-                if used_names.contains(name) {
-                    return Err(OptionDefinedTwice(name));
-                } else {
-                    used_names.insert(name);
-                }
-                if let Some(other_long) = aliases.get(&short) {
-                    return Err(SameShortName(name, other_long.clone()));
-                }
-                aliases.insert(short, name);
+    /// Attempts to find a target from the given option.
+    fn get_target<'a>(&'a mut self, option: &str, help: Rc<Help<'def>>)
+            -> Result<(Cow<'def, str>, &'a mut TargetRef<'def, 'tar>), ParseError<'def>> {
+        let mut key = &option[2..];
+        if ! option.starts_with("--") {
+            if let Some(mapped_key) = self.short_map.get(&option[1..]) {
+                key = mapped_key.as_ref();
+            } else {
+                return ParseError::parse(format!("Unknown option: '{}'", option), help);
             }
         }
+        if ! self.options.contains_key(key) {
+            return ParseError::parse(format!("Unknown option '{}'", option), help);
+        }
+        // INVARIANT: key is contained
+        let name = self.get_interned_name(key);
+        let target = self.options.get_mut(key).unwrap();
+        Ok((name, target))
+    }
+    
+    
+    fn read_option<'arg, I>(&mut self, option: &str, args: &mut I, 
+        given_values: &mut HashSet<Cow<'def, str>>, help: Rc<Help<'def>>) 
+        -> Result<Option<Cow<'def, str>>, ParseError<'def>>
+      where I: Iterator<Item=&'arg str>
+    {
+        use self::TargetRef::*;
+        match self.get_target(option, help.clone())? {
+            (_, &mut Flag(ref mut flag)) => {
+                **flag = true;
+            }
+            (_, &mut Count(ref mut count)) => {
+                **count += 1;
+            }
+            (ref name, &mut OptArg(ref mut value)) => {
+                if given_values.contains(name) {
+                    return ParseError::parse(format!("Option '{}' given twice!", name), help);
+                }
+                let arg = if let Some(arg) = args.next() {
+                    arg
+                } else {
+                    return ParseError::parse(format!("Missing argument for option '{}'", option), help);
+                };
+                match value.parse(arg) {
+                    Ok(_) => {}
+                    Err(msg) => return ParseError::parse(msg, help),
+                };
+                given_values.insert(name.clone());
+            }
+            (ref name, &mut Interrupt(ref mut callback)) => {
+                callback(help);
+                return Ok(Some(name.clone()));
+            }
+        }
+        Ok(None)
+    }
+}
+
+fn validate_short<'def, N: AsRef<str>>(name: &N) -> Result<(), ParseError<'def>> {
+    let name = name.as_ref();
+    if name.starts_with("-") {
+        ParseError::defs(format!("Invalid short identifier '{}'. Short ids may not start with '-'.", name))
+    } else {
         Ok(())
     }
-    
-    /// Starts a new parse checking for the expected argument structure among
-    /// the given list of arguments.
-    pub fn new<D>(expected: &'a [ArgDef<D>], args: &'b [T])
-            -> Result<Parse<'a, 'b, T>, DefinitionError<'a>> 
-            where D: Borrow<str> {
-        use self::DefinitionError::*;
-        use self::DefType::*;
-        
-        let mut options = HashMap::new();
-        let mut positional = Vec::new();
-        let mut trail = None;
-        
-        let mut aliases = HashMap::new();
-        let mut used_names = HashSet::new();
-        let mut used_positional_names = HashSet::new();
-        for def in expected {
-            match def.deftype {
-                Positional { ref name } => {
-                    if used_positional_names.contains(name.borrow()) {
-                        return Err(PositionalDefinedTwice(name.borrow()));
-                    } else {
-                        positional.push(name.borrow());
-                        used_positional_names.insert(name.borrow());
+}
+
+/// Sorts the given definitions and checks that all invariants are upheld.
+pub fn parse_definitions<'def, 'tar>(defs: Vec<ArgDef<'def, 'tar>>) 
+        -> Result<ParseState<'def, 'tar>, ParseError<'def>> {
+    let mut positional = VecDeque::new();
+    let mut trail = None;
+    let mut options = HashMap::new(); // long-to-arg
+    let mut short_map = HashMap::new(); // short-to-long
+    let mut subcommands = HashMap::new();
+    let mut has_positional = false;
+    let mut has_subcommand = false;
+    for def in defs {
+        match def.kind {
+            ArgDefKind::Positional { target } => {
+                if has_subcommand {
+                    return ParseError::defs(format!("Positional (+trail) and subcommand definitions cannot be used together."));
+                }
+                has_positional = true;
+                positional.push_back((def.name, target));
+            }
+            ArgDefKind::Trail { optional, target } => {
+                if has_subcommand {
+                    return ParseError::defs(format!("Positional (+trail) and subcommand definitions cannot be used together."));
+                }
+                has_positional = true;
+                if trail.is_some() {
+                    return ParseError::defs(format!("Two trails defined."));
+                }
+                trail = Some((def.name, optional, target));
+            }
+            ArgDefKind::Subcommand { handler } => {
+                if has_positional {
+                    return ParseError::defs(format!("Positional (+trail) and subcommand definitions cannot be used together."));
+                }
+                has_subcommand = true;
+                if subcommands.contains_key(&def.name) {
+                    return ParseError::defs(format!("Sucommand '{}' defined twice", def.name))
+                }
+                subcommands.insert(def.name, handler);
+            }
+            ArgDefKind::Flag { short, target } => {
+                if let Some(short) = short {
+                    validate_short(&short)?;
+                    if short_map.contains_key(&short) {
+                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
                     }
-                },
-                Trail{ trail: ref trail_type, .. } => {
-                    if trail.is_some() {
-                        return Err(TwoTrailsDefined);
-                    } else {
-                        trail = Some(trail_type.clone());
+                    short_map.insert(short, def.name.clone());
+                }
+                if options.contains_key(&def.name) {
+                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
+                }
+                options.insert(def.name, TargetRef::Flag(target));
+            }
+            ArgDefKind::Count { short, target } => {
+                if let Some(short) = short {
+                    validate_short(&short)?;
+                    if short_map.contains_key(&short) {
+                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
                     }
-                },
-                Switch { ref name } => {
-                    try!(Parse::<T>::add_name(name, &mut aliases, &mut used_names));
-                    options.insert(name.borrow_long().clone(), OptType::Switch);
-                },
-                Option { ref name, .. } => {
-                    try!(Parse::<T>::add_name(name, &mut aliases, &mut used_names));
-                    options.insert(name.borrow_long().clone(), OptType::Option);
-                },
+                    short_map.insert(short, def.name.clone());
+                }
+                if options.contains_key(&def.name) {
+                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
+                }
+                options.insert(def.name, TargetRef::Count(target));
+            }
+            ArgDefKind::OptArg { short, target } => {
+                if let Some(short) = short {
+                    validate_short(&short)?;
+                    if short_map.contains_key(&short) {
+                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
+                    }
+                    short_map.insert(short, def.name.clone());
+                }
+                if options.contains_key(&def.name) {
+                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
+                }
+                options.insert(def.name, TargetRef::OptArg(target));
+            }
+            ArgDefKind::Interrupt { short, callback } => {
+                if let Some(short) = short {
+                    validate_short(&short)?;
+                    if short_map.contains_key(&short) {
+                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
+                    }
+                    short_map.insert(short, def.name.clone());
+                }
+                if options.contains_key(&def.name) {
+                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
+                }
+                options.insert(def.name, TargetRef::Interrupt(callback));
             }
         }
-        
-        Ok(Parse {
-            args: args,
-            index: 0,
-            finished: false,
-            positional: positional,
-            next_position: 0,
-            trail: trail,
-            trail_args_found: 0,
-            options: options,
-            aliases: aliases,
-            remaining_grouped_shorts: vec![], 
-        })
+    }
+    Ok(ParseState { positional, trail, subcommands, options, short_map })
+}
+
+#[derive(Debug)]
+pub enum ParseError<'def> {
+    /// The given argument definitions aren't valid.
+    InvalidDefinitions(String),
+    
+    /// The parse could not finish succesfully.
+    ParseFailed(String, Rc<Help<'def>>),
+    
+    /// A subcommand failed to parse, and has been handled.
+    SubParseFailed,
+    
+    /// An interrupt-flag with the given name was encountered.
+    /// 
+    /// The variables pointed to by the definitions will not all have been
+    /// assigned their expected values.
+    Interrupted(Cow<'def, str>)
+}
+
+impl<'def> ParseError<'def> {
+    fn defs<T, S: Into<String>>(reason: S) -> Result<T, ParseError<'def>> {
+        Err(ParseError::InvalidDefinitions(reason.into()))
     }
     
-    fn read_option(&mut self, name: &'a str, opt_type: &OptType)
-            -> Result<Arg<'a, 'b>, ParseError<'a, 'b>> {
-        use self::OptType::*;
-        use self::ParseError::*;
-        match *opt_type {
-            Switch => {
-                Ok(Arg::Switch(name))
-            },
-            Option => {
-                if self.args.is_empty() {
-                    self.finished = true;
-                    Err(MissingParameter(name.borrow()))
-                } else {
-                    let arg_count = self.args.len();
-                    if self.index < arg_count {
-                        let ref param = self.args[self.index];
-                        let string = param.borrow();
-                        self.index += 1;
-                        if string.starts_with("-") {
-                            self.finished = true;
-                            Err(MissingParameter(name.clone()))
-                        } else {
-                            Ok(Arg::Option(name, string))
-                        }
-                    } else {
-                        self.finished = true;
-                        Err(MissingParameter(name.clone()))
-                    }
-                }
-            },
-        }
+    fn parse<T, S: Into<String>>(reason: S, help: Rc<Help<'def>>) -> Result<T, ParseError<'def>> {
+        Err(ParseError::ParseFailed(reason.into(), help))
     }
     
-    /// Returns the remaining unparsed arguments of this parse.
-    pub fn remainder(&self) -> &'b [T] {
-        &self.args[self.index..]
+    fn interrupt<T>(name: Cow<'def, str>) -> Result<T, ParseError<'def>> {
+       Err( ParseError::Interrupted(name))
     }
 }
 
-impl<'a, 'b, T: 'b + Borrow<str>> Iterator for Parse<'a, 'b, T> {
-    type Item = Result<Arg<'a, 'b>, ParseError<'a, 'b>>;
-
-    /// Attempts to read the next argument for this parse
-    fn next(&mut self) -> Option<Self::Item> {
-        use self::Arg::*;
-        use self::ParseError::*;
-        
-        if self.finished {
-            return None;
-        }
-        
-        // Check for extra grouped short arguments from the last parsed argument
-        
-        if let Some((index, short)) = self.remaining_grouped_shorts.pop() {            
-            let name = if let Some(name) = self.aliases.get(&short) {
-                name.clone()
-            } else {
-                self.finished = true;
-                return Some(Err(UnexpectedShortArgument(short, self.args[index].borrow())));
-            };
-            if let OptType::Option = *self.options.get(name).expect("Invariant broken") {
-                self.finished = true;
-                return Some(Err(GroupedNonSwitch(short, self.args[index].borrow())));
-            } else {
-                return Some(Ok(Switch(name)));
+/// Parses the given arguments and updates the defined variables with them.
+/// This version does not print usage in the case of parse errors, nor does 
+/// it 'un-propagate' parsing errors.
+pub fn parse_plain<'def, 'tar, T, P: Into<String>>(program: P, args: &[T], definitions: Vec<ArgDef<'def, 'tar>>) 
+    -> Result<(), ParseError<'def>>
+  where T: Borrow<str> 
+{ 
+    let program = program.into();
+    let help = Rc::new(Help::new(program.clone(), &definitions));
+    let mut defs = parse_definitions(definitions)?;
+    
+    //println!("Defs: {:?}", defs);
+    let mut args = args.iter().map(|e| e.borrow());
+    
+    // value-type definitions that have been given and should not be overridden
+    let mut given_values = HashSet::new();
+    
+    while let Some(arg) = args.next() {
+        // Option / interrupt
+        if arg.starts_with("-") {
+            if let Some(interrupt) = defs.read_option(arg, &mut args, &mut given_values, help.clone())? {
+                return ParseError::interrupt(interrupt);
             }
-        }
         
-        let arg_count = self.args.len();
-        let arg = if self.index < arg_count {
-            let ref arg = self.args[self.index];
-            self.index += 1;
-            arg
-        // No more arguments
+        // Positional
+        } else if ! defs.positional.is_empty() {
+            let (_name, target) = defs.positional.pop_front().unwrap();
+            match target.parse(arg) {
+                Ok(()) => {},
+                Err(msg) => return ParseError::parse(msg, help),
+            } // MAYBE: chain err
+        
+        // Subcommand
+        } else if ! defs.subcommands.is_empty() {
+            if let Some(handler) = defs.subcommands.get_mut(arg) {
+                let rest = args.collect::<Vec<_>>();
+                let subprogram = format!("{} {}", program, arg);
+                return handler(subprogram, &rest);
+            } else {
+                return ParseError::parse(format!("Unknown subcommand: '{}'", arg), help);
+            }
+        
+        // Trail
         } else {
-            self.finished = true;
-            // Missing positional
-            if self.next_position < self.positional.len() {
-                let pos = self.positional[self.next_position];
-                return Some(Err(MissingPositional(pos)));
-            // Missing trail
-            } else if let Some(TrailType::OnePlus) = self.trail {
-                if self.trail_args_found == 0 {
-                    return Some(Err(MissingTrail));
-                }
-            }
-            
-            return None;
-        };
-        
-        // Long argument
-        let string = arg.borrow();
-        if string.starts_with("--") {
-            let opt_type = if let Some(opt_type) = self.options.get(&string[2..]) {
-                opt_type.clone()
+            if let Some((_, ref mut satisfied, ref mut target)) = defs.trail {
+                match target.parse_and_add(arg) {
+                    Ok(()) => {},
+                    Err(msg) => return ParseError::parse(msg, help),
+                }; // TODO: chain err
+                *satisfied = true;
             } else {
-                self.finished = true;
-                return Some(Err(UnexpectedLongArgument(string.clone())));
-            };
-            // Exchange the "argument" reference with the "definition" one
-            let key = self.options.keys().find(|n| *n == &&string[2..]).unwrap().clone();
-            return Some(self.read_option(key, &opt_type));
-       
-        // Short argument
-        } else if string.starts_with("-") {
-            let mut shorts: Vec<_> = string.chars().skip(1)
-                .map(|ch| (self.index - 1, ch)).collect();
-            if shorts.len() > 1 { // grouped short args
-                shorts.reverse();
-                self.remaining_grouped_shorts = shorts;
-            } else {
-                let (_, short) = shorts[0];
-                let name = if let Some(name) = self.aliases.get(&short) {
-                    name.clone()
-                } else {
-                    self.finished = true;
-                    return Some(Err(UnexpectedShortArgument(short, string.clone())));
-                };
-                let opt_type = self.options.get(name).expect("Invariant broken").clone();
-                return Some(self.read_option(name, &opt_type));
-            }
-        
-        // Positional argument
-        } else {
-            // Positions left to be filled
-            if self.next_position < self.positional.len() {
-                let position = self.positional[self.next_position];
-                self.next_position += 1;
-                return Some(Ok(Positional(position, string)));
-            
-            // Trail
-            } else if let Some(_) = self.trail {
-                self.trail_args_found += 1;
-                return Some(Ok(TrailPart(string)));
-            
-            // No trail
-            } else {
-                self.finished = true;
-                return Some(Err(UnexpectedPositional(string)));
-            }
+                return ParseError::parse(format!("Unexpected argument '{}'", arg), help);
+            }            
         }
-        
-        None
     }
+    
+    if let Some((name, _)) = defs.positional.pop_front() {
+        return ParseError::parse(format!("Missing positional argument '{}'", name), help);
+    }
+    
+    if let Some((name, satisfied, _)) = defs.trail {
+        if ! satisfied {
+            return ParseError::parse(format!("Expected at least one trailing argument for '{}'", name), help);
+        }
+    }
+    
+    if ! defs.subcommands.is_empty() {
+        return ParseError::parse(format!("No subcommand specified"), help);
+    }
+    
+    Ok(())
 }
 
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn missing_positional() {
-        let pos = ArgDef::positional("pos");
-        let expected = &[pos];
-        let args: Vec<String> = vec![];
-        let mut parse = Parse::new(expected, &args).unwrap();
-        assert_eq!(
-            parse.next(), 
-            Some(Err(ParseError::MissingPositional("pos")))
-        );
-    }
-    
-    #[test]
-    fn example_parse_black_box() {
-        use super::Arg::*;
-        
-        let a_foo = ArgDef::positional("foo");
-        let a_foobar = ArgDef::required_trail();
-        let a_help = ArgDef::named_and_short("help", 'h').switch();
-        let a_version = ArgDef::named("version").switch();
-        let a_verbose = ArgDef::named_and_short("verbose", 'v').switch();
-        let a_exclude = ArgDef::named_and_short("exclude", 'x').option();
-        let a_passed = ArgDef::named("").switch();
-        
-        let args = vec![
-            String::from("foo"),
-            String::from("bar"),
-            String::from("-x"),
-            String::from("baz"),
-            String::from("--verbose"),
-            String::from("--"),
-            String::from("arg"),
-            String::from("--help]"),
-        ];
-        
-        let mut foo = "";
-        let mut foobar = Vec::new();
-        let mut verbose = false;
-        let mut exclude = None;
-        let mut passed = None;
-        
-        let expected = &[a_foo, a_foobar, a_help, a_version, a_verbose, a_exclude,
-             a_passed];
-    
-        let mut parse = Parse::new(expected, &args).expect("Invalid definitions");
-        while let Some(item) = parse.next() {
-            match item {
-                Ok(Positional { name: "foo", value }) => {
-                    foo = value;
-                },
-                Ok(Trail { value }) => {
-                    foobar.push(value);
-                },
-                Ok(Switch { name: "verbose" }) => {
-                    verbose = true;
-                },
-                Ok(Option { name: "exclude", value }) => {
-                    exclude = Some(value);
-                },
-                Ok(Switch { name: "" }) => {
-                    passed = Some(parse.remainder());
-                    break;
-                },
-                _ => unreachable!(),
-            }
+/// Parses the given arguments and updates the defined variables with them.
+/// 
+/// Errors are handled like this:
+/// - Invalid argument definitions (logic error): Panic.
+/// - Parse failed: Print usage and prevent the error from propagating.
+/// - Interrupt or sub parse failed: Just passed along.
+pub fn parse<'def, 'tar, T, P: Into<String>>(program: P, args: &[T], definitions: Vec<ArgDef<'def, 'tar>>) 
+    -> Result<(), ParseError<'def>>
+  where T: Borrow<str> 
+{ 
+    match parse_plain(program, args, definitions) {
+        Err(ParseError::InvalidDefinitions(msg)) => {
+            panic!("Invalid definitions: {}", msg);
         }
-        
-        assert_eq!(foo, "foo");
-        assert_eq!(foobar, vec!["bar"]);
-        assert_eq!(exclude, Some("baz"));
-        assert_eq!(verbose, true);
-        assert_eq!(passed, Some(&args[6..]));    
-    }
-    
-    #[test]
-    fn example_parse_white_box() {
-        use super::Arg::*;
-        
-        let a_foo = ArgDef::positional("foo");
-        let a_foobar = ArgDef::required_trail();
-        let a_help = ArgDef::named_and_short("help", 'h').switch();
-        let a_version = ArgDef::named("version").switch();
-        let a_verbose = ArgDef::named_and_short("verbose", 'v').switch();
-        let a_exclude = ArgDef::named_and_short("exclude", 'x').option();
-        let a_passed = ArgDef::named("").switch();
-        
-        let args = vec![
-            String::from("foo"),
-            String::from("bar"),
-            String::from("-x"),
-            String::from("baz"),
-            String::from("--verbose"),
-            String::from("--"),
-            String::from("arg"),
-            String::from("--version"),
-            String::from("--help"),
-        ];
-        
-        let expected = &[a_foo, a_foobar, a_help, a_version, a_verbose, a_exclude,
-             a_passed];
-    
-        let mut parse = Parse::new(expected, &args).expect("Invalid definitions");
-                
-        assert_eq!(parse.next(), Some(Ok(Positional{ name: "foo", value: "foo"})));
-        assert_eq!(parse.next(), Some(Ok(Trail { value: "bar"})));
-        assert_eq!(parse.next(), Some(Ok(Option { name: "exclude", value: "baz" })));
-        assert_eq!(parse.next(), Some(Ok(Switch { name: "verbose" })));
-        assert_eq!(parse.next(), Some(Ok(Switch { name: "" })));
-        assert_eq!(parse.next(), Some(Ok(Trail { value: "arg" })));
-        assert_eq!(parse.next(), Some(Ok(Switch { name: "version" })));
-        assert_eq!(parse.next(), Some(Ok(Switch { name: "help" })));
-        assert_eq!(parse.next(), None);
+        Err(ParseError::ParseFailed(msg, help)) => {
+            println!("Parse failed: {}", msg);
+            help.print_usage();
+            Err(ParseError::SubParseFailed)
+        }
+        other => other,
     }
 }
