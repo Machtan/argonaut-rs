@@ -31,7 +31,7 @@ pub struct Help<'def> {
     /// Subcommand arguments.
     pub subcommands: Vec<(Cow<'def, str>, Option<Cow<'def, str>>)>,
     /// Optional arguments.
-    pub options: Vec<(Cow<'def, str>, Option<Cow<'def, str>>, HelpOptKind, Option<Cow<'def, str>>)>,
+    pub options: Vec<(Cow<'def, str>, Option<Cow<'def, str>>, HelpOptKind<'def>, Option<Cow<'def, str>>)>,
     /// Is `--help` defined.
     pub help_defined: bool,
 }
@@ -67,10 +67,16 @@ impl<'def> Help<'def> {
                         HelpOptKind::Count, def.help_desc.clone()
                     ));
                 }
-                ArgDefKind::OptArg { ref short, .. } => {
+                ArgDefKind::OptArg { ref short, ref param, .. } => {
                     options.push((
                         def.name.clone(), short.clone(), 
-                        HelpOptKind::OptArg, def.help_desc.clone()
+                        HelpOptKind::OptArg(param.clone()), def.help_desc.clone()
+                    ));
+                }
+                ArgDefKind::Collect { ref short, ref param, .. } => {
+                    options.push((
+                        def.name.clone(), short.clone(),
+                        HelpOptKind::Collect(param.clone()), def.help_desc.clone()
                     ));
                 }
                 ArgDefKind::Interrupt { ref short, .. } => {
@@ -205,8 +211,40 @@ impl<'def> Help<'def> {
             if ! (has_positional || has_subcommands) {
                 s.push('\n');
             }
+            
+            let has_multi_arg_opt = self.options.iter().any(|&(_, _, ref kind, _)| {
+                match *kind {
+                    HelpOptKind::Count | HelpOptKind::Collect(_) => true,
+                    _ => false
+                }
+            });
+            
+            let has_interrupt = self.options.iter().any(|&(_, _, ref kind, _)| {
+                match *kind {
+                    HelpOptKind::Interrupt => true,
+                    _ => false
+                }
+            });
+            
+            let has_legend = has_multi_arg_opt || has_interrupt;
+            
             s.push_str("Optional arguments:\n");
-            for &(ref name, ref short, kind, ref help) in self.options.iter() {
+            
+            // 'Legend'
+            if has_multi_arg_opt {
+                s.push_str("  ( * ) This option can be given multiple times.\n");
+            }
+            
+            if has_interrupt {
+                s.push_str("  ( X ) This option interrupts normal parsing.\n");
+            }
+            
+            if has_legend {
+                s.push('\n');
+            }
+            
+            
+            for &(ref name, ref short, ref kind, ref help) in self.options.iter() {
                 s.push_str("  ");
                 s.push_str("--");
                 s.push_str(name.as_ref());
@@ -215,13 +253,32 @@ impl<'def> Help<'def> {
                     s.push('-');
                     s.push_str(short.as_ref());
                 }
-                match kind {
-                    HelpOptKind::OptArg => {
+                
+                // Argument
+                match *kind {
+                    HelpOptKind::OptArg(ref param)
+                    | HelpOptKind::Collect(ref param) => {
                         s.push(' ');
-                        s.push_str(&name.as_ref().to_uppercase());
+                        if let &Some(ref param) = param {
+                            s.push_str(param.as_ref());
+                        } else {
+                            s.push_str(&name.as_ref().to_uppercase());
+                        }
                     }
                     _ => {}
                 }
+                
+                // Markers
+                match *kind {
+                    HelpOptKind::Collect(_) | HelpOptKind::Count => {
+                        s.push_str(" ( * )");
+                    }
+                    HelpOptKind::Interrupt => {
+                        s.push_str(" ( X )");
+                    }
+                    _ => {}
+                }
+                
                 s.push('\n');
                 if let &Some(ref help) = help {
                     write_trimmed_n(&mut s, "      ", help);
@@ -241,14 +298,18 @@ impl<'def> Help<'def> {
 }
 
 /// Describes what kind of argument is expected.
-#[derive(Debug, Clone, Copy)]
-pub enum HelpOptKind {
+#[derive(Debug, Clone)]
+pub enum HelpOptKind<'def> {
     /// A flag. `./bin --verbose` => `true`
     Flag,
     /// A count. `./bin -v -v -v -v` => `4`
     Count,
-    /// An option with a value. `./bin --eat-cake yes`
-    OptArg,
+    /// An option with a value. `./bin --eat-cake yes` 
+    /// (optionally with a parameter name).
+    OptArg(Option<Cow<'def, str>>),
     /// An interrupt. `./bin --help`
     Interrupt,
+    /// An argument appearing multiple times `./bin -i 'foo.rs' -i 'bar.rs'`. 
+    /// (optionally with a parameter name).
+    Collect(Option<Cow<'def, str>>),
 }

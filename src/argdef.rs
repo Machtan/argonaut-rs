@@ -26,24 +26,30 @@ pub(crate) enum ArgDefKind<'def, 'tar> {
         handler: SubCmd<'def>,
     },
     Trail { 
-        optional: bool, 
         target: &'tar mut CollectionTarget,
+        optional: bool, 
     },
     Flag {
-        short: Option<Cow<'def, str>>,
         target: &'tar mut bool,
+        short: Option<Cow<'def, str>>,
     },
     Count {
-        short: Option<Cow<'def, str>>,
         target: &'tar mut usize,
+        short: Option<Cow<'def, str>>,
+    },
+    Collect {
+        target: &'tar mut CollectionTarget,
+        short: Option<Cow<'def, str>>,
+        param: Option<Cow<'def, str>>,
     },
     OptArg {
-        short: Option<Cow<'def, str>>,
         target: &'tar mut OptionTarget,
+        short: Option<Cow<'def, str>>,
+        param: Option<Cow<'def, str>>,
     },
     Interrupt {
-        short: Option<Cow<'def, str>>,
         callback: Box<FnMut(Rc<Help<'def>>)>,
+        short: Option<Cow<'def, str>>,
     },
 }
 
@@ -106,7 +112,7 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
     pub fn option<N>(name: N, target: &'tar mut OptionTarget) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>>
     {
-        ArgDef::new(name, ArgDefKind::OptArg { short: None, target })
+        ArgDef::new(name, ArgDefKind::OptArg { short: None, param: None, target })
     }
     
     /// Creates a description of a `flag`-type argument.
@@ -127,10 +133,19 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
         ArgDef::new(name, ArgDefKind::Count { short: None, target })
     }
     
-    /// Adds a short identifier for this option, like `-h` for `help`.
-    ///
-    /// **NOTE**: This method PANICS if used on a `positional`, `trail` or 
-    /// `subcommand` description.
+    /// Defines a 'collection'-type argument.
+    /// 
+    /// The flag can be given multiple times, and each argument to it will
+    /// be added to a collection variable. (ie: a Vec)
+    /// 
+    /// `gcc -i foo.h -i bar.h` => vec!["foo.h", "bar.h"]`
+    pub fn collect<N>(name: N, target: &'tar mut CollectionTarget) -> ArgDef<'def, 'tar>
+      where N: Into<Cow<'def, str>> 
+    {
+        ArgDef::new(name, ArgDefKind::Collect { short: None, param: None, target })
+    }
+    
+    /// Adds a short identifier for this option, like `-h` for `--help`.
     ///
     /// # Example
     /// ```
@@ -144,17 +159,41 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
         use self::ArgDefKind::*;
         self.kind = match self.kind {
             Positional { .. } | Trail { .. } | Subcommand { .. } => {
-                panic!("Positional, trail and subcommand arguments cannot have a short identifier");
+                println!("WARNING: Positional, trail and subcommand arguments cannot have a short identifier (ArgDef error)");
+                return self;
             },
             Flag { target, .. } => Flag { short: Some(short.into()), target },
             Count { target, .. } => Count { short: Some(short.into()), target },
-            OptArg { target, .. } => OptArg { short: Some(short.into()), target },
+            OptArg { target, param, .. } => OptArg { short: Some(short.into()), target, param },
             Interrupt { callback, .. } => Interrupt { short: Some(short.into()), callback },
+            Collect { target, param, .. } => Collect { short: Some(short.into()), target, param },
+        };
+        self
+    }
+    
+    /// Sets the name of the parameter for options that take parameters (`option` and `collect`).
+    ///
+    /// This is only used for help messages.
+    pub fn param<N>(mut self, parameter_name: N) -> Self where N: Into<Cow<'def, str>> {
+        use self::ArgDefKind::*;
+        self.kind = match self.kind {
+            OptArg { target, short, .. } => {
+                OptArg { target, short, param: Some(parameter_name.into()) }
+            }
+            Collect { target, short, .. } => {
+                Collect { target, short, param: Some(parameter_name.into()) }
+            }
+            _ => {
+                println!("WARNING: Only 'option' and 'collect' arguments have a parameter name (ArgDef error)");
+                return self;
+            }
         };
         self
     }
     
     /// Adds a help description for this argument.
+    /// 
+    /// This is only used for help messages.
     pub fn help<N>(mut self, help: N) -> Self where N: Into<Cow<'def, str>> {
         self.help_desc = Some(help.into());
         self

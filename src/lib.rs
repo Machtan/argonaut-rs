@@ -47,7 +47,6 @@ Tasks
 Optional
 - Implement a validate->assign->modify procedure in parse
 - Make a passthrough argument (cargo run -- --help)
-- Make a 'collect' argument (gcc -i foo.h -i bar.h)
 - Add examples to README and library top-level documentation
 - Add tests
 
@@ -59,6 +58,7 @@ Done
 - Change default parse function to write usage (no parse_subcommand)
 - Implement multi-target for all std::collections
 - Let parse results pass either Option<i32> or Option<T> to facilitate 'outer' abort.
+- Make a 'collect' argument (gcc -i foo.h -i bar.h)
 
 Abandoned
 - Make a default handler function for parse results.

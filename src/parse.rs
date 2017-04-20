@@ -11,6 +11,7 @@ pub enum TargetRef<'def, 'tar> {
     Count(&'tar mut usize),
     OptArg(&'tar mut OptionTarget),
     Interrupt(Box<FnMut(Rc<Help<'def>>)>),
+    Collect(&'tar mut CollectionTarget),
 }
 
 /// Sorted argument definitions. Updated mutably during the parse.
@@ -58,13 +59,13 @@ impl<'def, 'tar> ParseState<'def, 'tar> {
     {
         use self::TargetRef::*;
         match self.get_target(option, help.clone())? {
-            (_, &mut Flag(ref mut flag)) => {
-                **flag = true;
+            (_, &mut Flag(ref mut target)) => {
+                **target = true;
             }
-            (_, &mut Count(ref mut count)) => {
-                **count += 1;
+            (_, &mut Count(ref mut target)) => {
+                **target += 1;
             }
-            (ref name, &mut OptArg(ref mut value)) => {
+            (ref name, &mut OptArg(ref mut target)) => {
                 if given_values.contains(name) {
                     return ParseError::parse(format!("Option '{}' given twice!", name), help);
                 }
@@ -73,11 +74,22 @@ impl<'def, 'tar> ParseState<'def, 'tar> {
                 } else {
                     return ParseError::parse(format!("Missing argument for option '{}'", option), help);
                 };
-                match value.parse(arg) {
+                match target.parse(arg) {
                     Ok(_) => {}
                     Err(msg) => return ParseError::parse(msg, help),
                 };
                 given_values.insert(name.clone());
+            }
+            (_, &mut Collect(ref mut collection_target)) => {
+                let arg = if let Some(arg) = args.next() {
+                    arg
+                } else {
+                    return ParseError::parse(format!("Missing argument for option '{}'", option), help);
+                };
+                match collection_target.parse_and_add(arg) {
+                    Ok(_) => {}
+                    Err(msg) => return ParseError::parse(msg, help),
+                };
             }
             (ref name, &mut Interrupt(ref mut callback)) => {
                 callback(help);
@@ -95,6 +107,28 @@ fn validate_short<'def, N: AsRef<str>>(name: &N) -> Result<(), ParseError<'def>>
     } else {
         Ok(())
     }
+}
+
+fn add_option<'def, 'tar>(
+    name: Cow<'def, str>, 
+    short: Option<Cow<'def, str>>,
+    target: TargetRef<'def, 'tar>,
+    options: &mut HashMap<Cow<'def, str>, TargetRef<'def, 'tar>>,
+    short_map: &mut HashMap<Cow<'def, str>, Cow<'def, str>>,
+) -> Result<(), ParseError<'def>> 
+{
+    if let Some(short) = short {
+        validate_short(&short)?;
+        if short_map.contains_key(&short) {
+            return ParseError::defs(format!("Short name '{}' defined twice.", short));
+        }
+        short_map.insert(short, name.clone());
+    }
+    if options.contains_key(&name) {
+        return ParseError::defs(format!("Option '{}' defined twice.", name));
+    }
+    options.insert(name, target);
+    Ok(())
 }
 
 /// Sorts the given definitions and checks that all invariants are upheld.
@@ -137,56 +171,19 @@ pub fn parse_definitions<'def, 'tar>(defs: Vec<ArgDef<'def, 'tar>>)
                 subcommands.insert(def.name, handler);
             }
             ArgDefKind::Flag { short, target } => {
-                if let Some(short) = short {
-                    validate_short(&short)?;
-                    if short_map.contains_key(&short) {
-                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
-                    }
-                    short_map.insert(short, def.name.clone());
-                }
-                if options.contains_key(&def.name) {
-                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
-                }
-                options.insert(def.name, TargetRef::Flag(target));
+                add_option(def.name, short, TargetRef::Flag(target), &mut options, &mut short_map)?;
             }
             ArgDefKind::Count { short, target } => {
-                if let Some(short) = short {
-                    validate_short(&short)?;
-                    if short_map.contains_key(&short) {
-                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
-                    }
-                    short_map.insert(short, def.name.clone());
-                }
-                if options.contains_key(&def.name) {
-                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
-                }
-                options.insert(def.name, TargetRef::Count(target));
+                add_option(def.name, short, TargetRef::Count(target), &mut options, &mut short_map)?;
             }
-            ArgDefKind::OptArg { short, target } => {
-                if let Some(short) = short {
-                    validate_short(&short)?;
-                    if short_map.contains_key(&short) {
-                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
-                    }
-                    short_map.insert(short, def.name.clone());
-                }
-                if options.contains_key(&def.name) {
-                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
-                }
-                options.insert(def.name, TargetRef::OptArg(target));
+            ArgDefKind::Collect { short, target, .. } => {
+                add_option(def.name, short, TargetRef::Collect(target), &mut options, &mut short_map)?;
+            }
+            ArgDefKind::OptArg { short, target, .. } => {
+                add_option(def.name, short, TargetRef::OptArg(target), &mut options, &mut short_map)?;
             }
             ArgDefKind::Interrupt { short, callback } => {
-                if let Some(short) = short {
-                    validate_short(&short)?;
-                    if short_map.contains_key(&short) {
-                        return ParseError::defs(format!("Short name '{}' defined twice.", short));
-                    }
-                    short_map.insert(short, def.name.clone());
-                }
-                if options.contains_key(&def.name) {
-                    return ParseError::defs(format!("Option '{}' defined twice.", def.name));
-                }
-                options.insert(def.name, TargetRef::Interrupt(callback));
+                add_option(def.name, short, TargetRef::Interrupt(callback), &mut options, &mut short_map)?;
             }
         }
     }

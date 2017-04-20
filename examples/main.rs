@@ -4,6 +4,7 @@ use std::env;
 use std::iter;
 use argonaut::{ArgDef, parse, ParseError, help_arg, version_arg};
 use std::process;
+use std::collections::HashSet;
 
 fn main() {
     if let Some(exit_code) = argonaut_main() {
@@ -21,6 +22,7 @@ fn argonaut_main() -> Option<i32> {
     let mut stars = 0;
     let mut verbose = false;
     let mut numbers: Vec<i32> = Vec::new();
+    let mut includes: HashSet<String> = HashSet::new();
     
     let description = "
         Test program for an argument parsing library.
@@ -31,17 +33,26 @@ fn argonaut_main() -> Option<i32> {
     match parse("argonaut", &args, vec![
         ArgDef::pos("first", &mut first)
             .help("The first argument."),
+        
         ArgDef::pos("second", &mut second)
             .help("The second argument."),
+        
         ArgDef::pos("third-is-better", &mut third)
             .help("Whether the third argument is better than the rest."),
+        
         ArgDef::trail("numbers", true, &mut numbers)
             .help("A bunch of numbers used for nefarious machinations."),
         
-        ArgDef::option("cool", &mut cool_thing)
+        
+        ArgDef::collect("include", &mut includes).short("i").param("file")
+            .help("Which files to include in the cake."),
+        
+        ArgDef::option("cool", &mut cool_thing).param("<something cool>")
             .help("Something that you think is cool enough to pass."),
+        
         ArgDef::count("star", &mut stars).short("s")
             .help("How many stars does this library deserve?"),
+        
         ArgDef::flag("verbose", &mut verbose).short("v")
             .help("Print as much information as possible."),
         
@@ -49,15 +60,20 @@ fn argonaut_main() -> Option<i32> {
         version_arg(),
     ]) {
         Ok(_) => {},
-        Err(ParseError::Interrupted(_)) => {},
-        Err(_) => return Some(1),
+        Err(ParseError::Interrupted(_)) => {
+            return None;
+        },
+        Err(_) => {
+            return Some(1);
+        }
     };
     
     println!("First:   {}", first);
     println!("Second:  {}", second);
-    println!("Third is better?:   {}", third);
+    println!("Third is better?: {}", third);
     println!("");
-    println!("Numbers: {:?}", numbers);
+    println!("Numbers:          {:?}", numbers);
+    println!("Included files:   {:?}", includes);
     if verbose {
         println!("VERBOSE!");
     }
