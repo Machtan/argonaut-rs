@@ -44,6 +44,7 @@ return success
 /*
 Tasks
 - Implement multi-target for all std::collections
+- Let parse results pass either Option<i32> or Option<T> to facilitate 'outer' abort.
 
 Optional
 - Implement a validate->assign->modify procedure in parse

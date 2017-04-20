@@ -116,7 +116,12 @@ impl<'def> Help<'def> {
             }
         }
         
-        if ! self.subcommands.is_empty() {
+        if self.subcommands.len() == 1 {
+            s.push(' ');
+            let ref name = self.subcommands[0].0;
+            s.push_str(name.as_ref());
+            s.push_str(" [args...]");
+        } else if self.subcommands.len() > 1 {
             s.push_str(" { ");
             let last = self.subcommands.len() - 1;
             for (i, &(ref name, _)) in self.subcommands.iter().enumerate() {
@@ -125,7 +130,7 @@ impl<'def> Help<'def> {
                     s.push_str(" | ");
                 }
             }
-            s.push_str(" }");
+            s.push_str(" } [args...]");
         }
     }
     
