@@ -30,7 +30,7 @@ pub struct Help<'def> {
     pub trail: Option<(Cow<'def, str>, bool, Option<Cow<'def, str>>)>,
     /// Subcommand arguments.
     pub subcommands: Vec<(Cow<'def, str>, Option<Cow<'def, str>>)>,
-    /// Optional arguments.
+    /// Optional arguments (name, short, kind, help).
     pub options: Vec<(Cow<'def, str>, Option<Cow<'def, str>>, HelpOptKind<'def>, Option<Cow<'def, str>>)>,
     /// Is `--help` defined.
     pub help_defined: bool,
@@ -93,18 +93,40 @@ impl<'def> Help<'def> {
         Help { program, positional, trail, subcommands, options, help_defined }
     }
     
+    fn get_help_short(&self) -> Option<Cow<'def, str>> {
+        if ! self.help_defined {
+            return None;
+        }
+        for &(ref name, ref short, _, _) in &self.options {
+            if name.as_ref() == "help" {
+                return short.clone();
+            }
+        }
+        None
+    }
+    
     fn write_usage_into(&self, s: &mut String) {
         s.push_str(&self.program);
         
         if ! self.options.is_empty() {
             if self.help_defined {
-                if self.options.len() > 1 { // Not only --help
-                    s.push_str(" [ --help | OPTIONS ]");
+                if let Some(help_short) = self.get_help_short() {
+                    s.push_str(" [-");
+                    s.push_str(help_short.as_ref());
+                    if self.options.len() > 1 {
+                        s.push_str(", OPTS...");
+                    }
+                    s.push_str("]");
                 } else {
-                    s.push_str(" [ --help ]");
+                    s.push_str(" [--help");
+                    if self.options.len() > 1 {
+                        s.push_str(", OPTS...");
+                    }
+                    s.push_str("]");
                 }
             } else {
-                s.push_str(" [ OPTIONS ]");
+                // TODO: This isn't super good helpful :/
+                s.push_str(" [opts...]");
             }
         }
         
@@ -122,12 +144,13 @@ impl<'def> Help<'def> {
             }
         }
         
-        if self.subcommands.len() == 1 {
+        /*if self.subcommands.len() == 1 {
             s.push(' ');
             let ref name = self.subcommands[0].0;
             s.push_str(name.as_ref());
             s.push_str(" [args...]");
-        } else if self.subcommands.len() > 1 {
+        } else */  
+        if ! self.subcommands.is_empty() {
             s.push_str(" { ");
             let last = self.subcommands.len() - 1;
             for (i, &(ref name, _)) in self.subcommands.iter().enumerate() {
@@ -136,7 +159,7 @@ impl<'def> Help<'def> {
                     s.push_str(" | ");
                 }
             }
-            s.push_str(" } [args...]");
+            s.push_str(" } ...");
         }
     }
     

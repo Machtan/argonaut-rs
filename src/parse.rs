@@ -259,7 +259,12 @@ pub fn parse_plain<'def, 'tar, T, P: Into<String>>(program: P, args: &[T], defin
         } else if ! defs.subcommands.is_empty() {
             if let Some(handler) = defs.subcommands.get_mut(arg) {
                 let rest = args.collect::<Vec<_>>();
-                let subprogram = format!("{} {}", program, arg);
+                // Allow 'empty' super-program.
+                let subprogram = if program != "" {
+                    format!("{} {}", program, arg)
+                } else {
+                    arg.to_string()
+                };
                 return handler(subprogram, &rest);
             } else {
                 return ParseError::parse(format!("Unknown subcommand: '{}'", arg), help);

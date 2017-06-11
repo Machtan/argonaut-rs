@@ -74,7 +74,7 @@ fn argonaut_main() -> Option<i32> {
         // Declare an '--include' option that takes a String value and adds
         // it to the HashSet 'includes'.
         // The option can be given multiple times to add more values. 
-        ArgDef::collector("include", &mut includes)
+        ArgDef::collect("include", &mut includes)
             // Adds '-i' as an alias for this option.
             .short("i")
             // Sets the parameter name for this option to 'file' in the generated
@@ -92,7 +92,7 @@ fn argonaut_main() -> Option<i32> {
         // Declare a '--star' counter, that counts the number of times '--star'
         // or '-s' was passed, and increments 'stars' each time.
         // Counter arguments can be passed multiple times.
-        ArgDef::counter("star", &mut stars).short("s")
+        ArgDef::count("star", &mut stars).short("s")
             .help("How many stars does this library deserve?"),
         
         // Declare a '--verbose' flag, that sets a value to 'true' if passed.

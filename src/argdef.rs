@@ -130,22 +130,22 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
         ArgDef::new(name, ArgDefKind::Flag { short: None, target })
     }
     
-    /// Creates a description of a `counter`-type argument.
+    /// Creates a description of a `count`-type argument.
     /// 
     /// This will count the number of times the flag was passed in the arguments.
-    pub fn counter<N>(name: N, target: &'tar mut usize) -> ArgDef<'def, 'tar>
+    pub fn count<N>(name: N, target: &'tar mut usize) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>> 
     {
         ArgDef::new(name, ArgDefKind::Count { short: None, target })
     }
     
-    /// Defines a 'collector'-type argument.
+    /// Defines a 'collect'-type argument.
     /// 
     /// The flag can be given multiple times, and each argument to it will
     /// be added to a collection variable. (ie: a Vec)
     /// 
     /// `gcc -i foo.h -i bar.h` => vec!["foo.h", "bar.h"]`
-    pub fn collector<N>(name: N, target: &'tar mut CollectionTarget) -> ArgDef<'def, 'tar>
+    pub fn collect<N>(name: N, target: &'tar mut CollectionTarget) -> ArgDef<'def, 'tar>
       where N: Into<Cow<'def, str>> 
     {
         ArgDef::new(name, ArgDefKind::Collect { short: None, param: None, target })
