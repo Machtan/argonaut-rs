@@ -150,7 +150,22 @@ impl<'def, 'tar> ArgDef<'def, 'tar> {
     {
         ArgDef::new(name, ArgDefKind::Collect { short: None, param: None, target })
     }
-    
+
+    /// Creates a default help interrupt for `--help`.
+    pub fn default_help<D: Into<Cow<'static, str>>>(description: D) -> ArgDef<'def, 'tar> {
+        let description = description.into();
+        ArgDef::interrupt("help", move |help| {
+            help.print_help(description.as_ref());
+        }).help("Print this message and abort.")
+    }
+
+    /// Creates a default version interrupt for `--version`.
+    pub fn default_version() -> ArgDef<'def, 'tar> {
+        ArgDef::interrupt("version", |_| {
+            println!("{}", option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0"));
+        }).help("Print version string and abort.")
+    }
+
     /// Adds a short identifier for this option, like `-h` for `--help`.
     ///
     /// # Example

@@ -2,7 +2,7 @@ extern crate argonaut;
 
 use std::env;
 use std::iter;
-use argonaut::{ArgDef, parse, ParseError, help_arg, version_arg};
+use argonaut::{ArgDef, parse, ParseError};
 use std::process;
 use std::collections::HashSet;
 
@@ -108,11 +108,11 @@ fn argonaut_main() -> Option<i32> {
         // 
         // As this 'interrupts' the parsing, the required values,
         // 'one', 'two' and 'third-is-better', will not have been set.
-        help_arg(description).short("h"),
+        ArgDef::default_help(description).short("h"),
         
         // Declare a default '--version' argument that prints the SemVer version
         // from 'Cargo.toml' and interrupts.
-        version_arg(),
+        ArgDef::default_version(),
     ]) {
         // If the parse has succeeded, all required (positional) values will
         // have been assigned to their target variables.

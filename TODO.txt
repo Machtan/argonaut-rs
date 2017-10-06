@@ -1,0 +1,7 @@
+
+- Improve error messages when auto-parsing through SingleTarget
+- Make sure that all given arguments are 'assigned' before parsing them
+- Or validate them?
+- Disallow passing positional arguments between option arguments?
+  (so that giving a flag an argument won't result in an unintended positional)
+  (example: running 'kor translate -l wl.txt ark.txt' where... oh heck, that's still valid )

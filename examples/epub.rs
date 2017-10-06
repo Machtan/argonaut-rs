@@ -1,7 +1,7 @@
 extern crate argonaut;
 
 use std::env;
-use argonaut::{ArgDef, parse, ParseError, help_arg, version_arg};
+use argonaut::{ArgDef, parse, ParseError};
 use std::process;
 
 fn main() {
@@ -58,7 +58,7 @@ fn epub_main() -> Option<i32> {
                 
                 // This creates a simple 'interrupt' flag for '--help' that
                 // shows help for this subcommand with the given description.
-                help_arg("
+                ArgDef::default_help("
                     Compiles an ePub from a markdown source and a TOML specification. The files in
                     the specification are sought relatively to the location of the specification
                     file, so use absolute paths when needed. If no arguments are given, the
@@ -98,7 +98,7 @@ fn epub_main() -> Option<i32> {
                 ArgDef::positional("folder", &mut folder)
                     .help("The folder to load images from."),
                 
-                help_arg(
+                ArgDef::default_help(
                 "
                     Creates a simple epub from the images in the given folder.
                     This is useful for quickly creating rather bad comic epubs.
@@ -111,8 +111,8 @@ fn epub_main() -> Option<i32> {
         })
         .help("Creates a simple ePub from the images in the given folder."),
         
-        help_arg(description).short("h"),
-        version_arg(),
+        ArgDef::default_help(description).short("h"),
+        ArgDef::default_version(),
     ]) 
     // This is probably how any subcommand-parsing function should look
     // Ok and Interrupt means that it terminated as expected.
